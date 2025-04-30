@@ -7,8 +7,7 @@
 
   <!-- PDF-Lib -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-
-  <!-- PDF.js for rasterizing pages -->
+  <!-- PDF.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -16,78 +15,24 @@
   </script>
 
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #f5f5f5;
-    }
-    .container {
-      background-color: white;
-      border-radius: 8px;
-      padding: 20px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-    h1 {
-      text-align: center;
-      color: #333;
-      margin-bottom: 20px;
-      font-size: 24px;
-    }
-    .upload-area {
-      border: 2px dashed #ccc;
-      border-radius: 6px;
-      padding: 30px;
-      text-align: center;
-      margin-bottom: 20px;
-      cursor: pointer;
-      transition: background-color 0.3s;
-    }
-    .upload-area:hover { background-color: #f9f9f9; }
-    .upload-area.active {
-      border-color: #4CAF50;
-      background-color: rgba(76,175,80,0.1);
-    }
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+    .container { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { text-align: center; margin-bottom: 20px; }
+    .upload-area { border: 2px dashed #ccc; border-radius: 6px; padding: 30px; text-align: center; cursor: pointer; transition: background 0.3s; }
+    .upload-area:hover { background: #fafafa; }
+    .upload-area.active { border-color: #4CAF50; background: rgba(76,175,80,0.1); }
     #file-input { display: none; }
-    .settings { margin-bottom: 20px; }
+    .settings, .status { margin-top: 20px; }
     label { display: block; margin-bottom: 8px; font-weight: bold; }
-    select, input {
-      width: 100%; padding: 8px; margin-bottom: 15px;
-      border: 1px solid #ddd; border-radius: 4px;
-    }
-    button {
-      background-color: #4CAF50; color: white; border: none;
-      padding: 10px 15px; border-radius: 4px;
-      cursor: pointer; width: 100%; font-size: 16px;
-      transition: background-color 0.3s;
-    }
-    button:hover { background-color: #45a049; }
-    button:disabled {
-      background-color: #ccc; cursor: not-allowed;
-    }
-    .status { margin-top: 20px; text-align: center; }
-    progress { width: 100%; margin-top: 10px; display: none; }
-    .download-link {
-      display: block; margin-top: 20px; text-align: center;
-      color: #4CAF50; text-decoration: none; font-weight: bold;
-    }
+    select, button { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 4px; border: 1px solid #ddd; }
+    button { background: #4CAF50; color: white; border: none; font-size: 16px; cursor: pointer; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    progress { width: 100%; display: none; margin-top: 10px; }
+    .download-link { display: none; margin-top: 20px; text-align: center; font-weight: bold; color: #4CAF50; text-decoration: none; }
     .download-link:hover { text-decoration: underline; }
-    .file-info {
-      margin-top: 15px; background-color: #f5f5f5;
-      padding: 10px; border-radius: 4px; display: none;
-    }
-    .error { color: #f44336; margin-top: 10px; font-weight: bold; }
-    #log-area {
-      font-family: monospace;
-      white-space: pre-wrap;
-      max-height: 200px;
-      overflow-y: auto;
-      background: #eee;
-      padding: 10px;
-      border-radius: 4px;
-      margin-top: 15px;
-    }
+    .file-info { background: #f5f5f5; padding: 10px; border-radius: 4px; display: none; }
+    .error { color: #f44336; }
+    #log-area { font-family: monospace; white-space: pre-wrap; max-height: 200px; overflow-y: auto; background: #eee; padding: 10px; border-radius: 4px; margin-top: 15px; }
   </style>
 </head>
 <body>
@@ -99,7 +44,7 @@
       <input type="file" id="file-input" accept=".pdf" />
     </div>
 
-    <div class="file-info" id="file-info">
+    <div id="file-info" class="file-info">
       <p>File: <span id="file-name"></span></p>
       <p>Original size: <span id="original-size"></span></p>
     </div>
@@ -111,21 +56,17 @@
         <option value="medium" selected>Medium – ~50% Size</option>
         <option value="high">High – ~20% Size</option>
       </select>
+      <button id="compress-btn" disabled>Compress PDF</button>
     </div>
 
-    <button id="compress-btn" disabled>Compress PDF</button>
-
-    <div class="status" id="status">
+    <div class="status">
       <p id="status-text"></p>
-      <progress id="progress-bar" value="0" max="100"></progress>
+      <progress id="progress-bar" max="100" value="0"></progress>
     </div>
 
-    <!-- Log area for iteration details -->
     <div id="log-area"></div>
 
-    <a href="#" id="download-link" class="download-link" style="display:none;">
-      Download Compressed PDF
-    </a>
+    <a id="download-link" class="download-link">Download Compressed PDF</a>
   </div>
 
   <script>
@@ -144,62 +85,46 @@
 
     let selectedFile = null;
     let lastObjectURL = null;
+    const pixelRatio = window.devicePixelRatio || 1;
+    const isSafari   = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
     uploadArea.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', handleFileSelect);
-    uploadArea.addEventListener('dragover', e => {
-      e.preventDefault();
-      uploadArea.classList.add('active');
-    });
-    uploadArea.addEventListener('dragleave', e => {
-      e.preventDefault();
-      uploadArea.classList.remove('active');
-    });
-    uploadArea.addEventListener('drop', handleDrop);
+    fileInput.addEventListener('change', e => selectFile(e.target.files[0]));
+    uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('active'); });
+    uploadArea.addEventListener('dragleave', e => { e.preventDefault(); uploadArea.classList.remove('active'); });
+    uploadArea.addEventListener('drop', e => { e.preventDefault(); uploadArea.classList.remove('active'); selectFile(e.dataTransfer.files[0]); });
     compressBtn.addEventListener('click', compressPDF);
 
-    function handleFileSelect(e) {
-      const f = e.target.files[0];
-      if (!f || f.type !== 'application/pdf') return showError('Please select a PDF file');
-      processSelectedFile(f);
-    }
-    function handleDrop(e) {
-      e.preventDefault();
-      uploadArea.classList.remove('active');
-      const f = e.dataTransfer.files[0];
-      if (!f || f.type !== 'application/pdf') return showError('Please drop a PDF file');
-      processSelectedFile(f);
-    }
-    function processSelectedFile(file) {
+    function selectFile(file) {
+      if (!file || file.type!=='application/pdf') return showError('Please select a PDF file');
       selectedFile = file;
-      compressBtn.disabled = false;
       fileName.textContent = file.name;
-      originalSize.textContent = formatFileSize(file.size);
+      originalSize.textContent = formatSize(file.size);
       fileInfo.style.display = 'block';
+      compressBtn.disabled = false;
       statusText.textContent = '';
       downloadLink.style.display = 'none';
       logArea.textContent = '';
-      uploadArea.querySelector('p').textContent =
-        'PDF selected! Drop another or click to change';
+      uploadArea.querySelector('p').textContent = 'PDF selected! Drop another or click to change';
     }
 
     async function compressPDF() {
       if (!selectedFile) return;
+      compressBtn.disabled = true;
+      logArea.textContent = '';
+      _setStatus('Initializing…', 5);
+
       try {
-        _setStatus('Initializing…', 5);
-        compressBtn.disabled = true;
-        logArea.textContent = '';
-
-        const data = await selectedFile.arrayBuffer();
+        const data   = await selectedFile.arrayBuffer();
         _setStatus('Loading PDF…', 15);
-        const pdfJS = await pdfjsLib.getDocument({ data }).promise;
-
-        const fileSize = selectedFile.size;
-        const targetRatio = getTargetRatio();
-        _log(`Target size ratio: ${(targetRatio*100).toFixed(0)}%`);
+        const pdfJS  = await pdfjsLib.getDocument({ data }).promise;
+        const origSz = selectedFile.size;
+        const target = getTargetRatio();
+        const iter0  = isSafari ? target * 0.8 : target;
+        _log(`Safari=${isSafari}, start quality=${iter0.toFixed(2)}`);
 
         _setStatus('Compressing…', 20);
-        const blob = await iterativeCompress(pdfJS, fileSize, targetRatio);
+        const blob = await iterativeCompress(pdfJS, origSz, target, iter0);
 
         _setStatus('Finalizing…', 90);
         _setStatus('Done!', 100);
@@ -207,91 +132,85 @@
         if (lastObjectURL) URL.revokeObjectURL(lastObjectURL);
         lastObjectURL = URL.createObjectURL(blob);
 
-        downloadLink.href = lastObjectURL;
-        downloadLink.download = getCompressedFileName(selectedFile.name);
+        downloadLink.href        = lastObjectURL;
+        downloadLink.download    = getOutputName(selectedFile.name);
         downloadLink.style.display = 'block';
 
-        const savings = ((fileSize - blob.size)/fileSize*100).toFixed(1);
-        statusText.textContent =
-          `Reduced by ${savings}% — ${formatFileSize(fileSize)} → ${formatFileSize(blob.size)}`;
+        const savings = ((origSz - blob.size)/origSz*100).toFixed(1);
+        statusText.textContent = `Reduced by ${savings}% — ${formatSize(origSz)} → ${formatSize(blob.size)}`;
 
-      } catch (err) {
-        console.error(err);
-        showError('Compression failed. Please try another file.');
+      } catch (e) {
+        console.error(e);
+        showError('Compression failed. Try another file.');
       } finally {
         compressBtn.disabled = false;
       }
     }
 
-    async function iterativeCompress(pdfJS, fileSize, targetRatio) {
-      let quality = targetRatio;
-      let blob = null;
-      const maxIter = 3;
+    async function iterativeCompress(pdfJS, origSz, target, initialQuality) {
+      let quality = initialQuality;
+      let blob;
+      const maxIter = 5;
 
-      for (let i = 1; i <= maxIter; i++) {
-        _log(`\nIteration ${i}: trying quality=${quality.toFixed(2)}`);
+      for (let i=1; i<=maxIter; i++) {
+        _log(`\nIteration ${i}: quality=${quality.toFixed(2)}`);
         blob = await compressPages(pdfJS, quality);
-        const ratio = blob.size / fileSize;
-        _log(`→ size=${formatFileSize(blob.size)} (${(ratio*100).toFixed(1)}%)`);
+        const ratio = blob.size / origSz;
+        _log(`→ size=${formatSize(blob.size)} (${(ratio*100).toFixed(1)}%)`);
 
-        // stop if within ±5% of target
-        if (Math.abs(ratio - targetRatio) < 0.05) {
-          _log(`Within tolerance (±5%).`);
+        if (ratio <= target) {
+          _log(`Reached ≤ target ${ (target*100).toFixed(0)}% — stopping.`);
           break;
         }
-        // adjust quality estimate
-        quality = quality * (targetRatio / ratio);
-        quality = Math.min(1, Math.max(0.1, quality));
+        // adjust quality downward
+        quality = Math.max(0.1, quality * (target / ratio));
       }
       return blob;
     }
 
     async function compressPages(pdfJS, quality) {
+      const outPdf    = await PDFDocument.create();
       const pageCount = pdfJS.numPages;
-      const outPdf = await PDFDocument.create();
 
-      for (let i = 1; i <= pageCount; i++) {
+      for (let i=1; i<=pageCount; i++) {
         const page = await pdfJS.getPage(i);
-        const vp = page.getViewport({ scale: 1.0 });
+        const vp   = page.getViewport({ scale: 1 });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
+        canvas.width  = vp.width  * pixelRatio;
+        canvas.height = vp.height * pixelRatio;
         const ctx = canvas.getContext('2d');
+        ctx.scale(pixelRatio, pixelRatio);
 
         _setStatus(`Rendering ${i}/${pageCount}…`, 20 + (i-1)*(50/pageCount));
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
 
-        _setStatus(`Encoding ${i}/${pageCount} at q=${quality.toFixed(2)}…`, 25 + (i-1)*(50/pageCount));
-        const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
-        const jpgBytes   = await fetch(jpegDataUrl).then(r => r.arrayBuffer());
-        const jpg        = await outPdf.embedJpg(jpgBytes);
+        _setStatus(`Encoding ${i}/${pageCount} q=${quality.toFixed(2)}…`, 25 + (i-1)*(50/pageCount));
+        const jpegURL = canvas.toDataURL('image/jpeg', quality);
+        const bytes   = await fetch(jpegURL).then(r=>r.arrayBuffer());
+        const img     = await outPdf.embedJpg(bytes);
 
-        const { width, height } = jpg.scale(1);
+        const { width, height } = img.scale(1);
         const newPage = outPdf.addPage([width, height]);
-        newPage.drawImage(jpg, { x: 0, y: 0, width, height });
+        newPage.drawImage(img, { x:0, y:0, width, height });
       }
 
-      _setStatus('Merging pages…', 80);
+      _setStatus('Merging…', 80);
       const outBytes = await outPdf.save({ useObjectStreams: true });
-      return new Blob([outBytes], { type: 'application/pdf' });
+      return new Blob([outBytes], { type:'application/pdf' });
     }
 
     function getTargetRatio() {
-      switch (compressionSel.value) {
-        case 'low':    return 0.8;
-        case 'high':   return 0.2;
-        default:       return 0.5;
-      }
+      return { low:0.8, medium:0.5, high:0.2 }[compressionSel.value];
     }
-    function formatFileSize(b) {
-      if (b < 1024)      return b + ' bytes';
-      if (b < 1048576)   return (b/1024).toFixed(1) + ' KB';
-      return (b/1048576).toFixed(1) + ' MB';
+    function formatSize(b) {
+      if (b<1024)        return b+' bytes';
+      if (b<1048576)     return (b/1024).toFixed(1)+' KB';
+      return (b/1048576).toFixed(1)+' MB';
     }
-    function getCompressedFileName(n) {
-      const p = n.split('.');
-      const ext = p.pop();
-      return p.join('.') + '-compressed.' + ext;
+    function getOutputName(n) {
+      const parts = n.split('.');
+      const ext   = parts.pop();
+      return parts.join('.') + '-compressed.'+ext;
     }
     function showError(msg) {
       statusText.innerHTML = `<span class="error">${msg}</span>`;
@@ -302,9 +221,9 @@
       progressBar.style.display = 'block';
       progressBar.value = pct;
     }
-    function _log(msg) {
-      console.log(msg);
-      logArea.textContent += msg + '\n';
+    function _log(txt) {
+      console.log(txt);
+      logArea.textContent += txt + '\n';
     }
   </script>
 </body>
