@@ -78,6 +78,16 @@
       padding: 10px; border-radius: 4px; display: none;
     }
     .error { color: #f44336; margin-top: 10px; font-weight: bold; }
+    #log-area {
+      font-family: monospace;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+      background: #eee;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 15px;
+    }
   </style>
 </head>
 <body>
@@ -97,9 +107,9 @@
     <div class="settings">
       <label for="compression-level">Compression Level</label>
       <select id="compression-level">
-        <option value="low">Low – Better Quality</option>
-        <option value="medium" selected>Medium – Balanced</option>
-        <option value="high">High – Smaller Size</option>
+        <option value="low">Low – ~80% Size</option>
+        <option value="medium" selected>Medium – ~50% Size</option>
+        <option value="high">High – ~20% Size</option>
       </select>
     </div>
 
@@ -109,6 +119,9 @@
       <p id="status-text"></p>
       <progress id="progress-bar" value="0" max="100"></progress>
     </div>
+
+    <!-- Log area for iteration details -->
+    <div id="log-area"></div>
 
     <a href="#" id="download-link" class="download-link" style="display:none;">
       Download Compressed PDF
@@ -127,6 +140,7 @@
     const progressBar    = document.getElementById('progress-bar');
     const downloadLink   = document.getElementById('download-link');
     const compressionSel = document.getElementById('compression-level');
+    const logArea        = document.getElementById('log-area');
 
     let selectedFile = null;
     let lastObjectURL = null;
@@ -156,7 +170,6 @@
       if (!f || f.type !== 'application/pdf') return showError('Please drop a PDF file');
       processSelectedFile(f);
     }
-
     function processSelectedFile(file) {
       selectedFile = file;
       compressBtn.disabled = false;
@@ -165,17 +178,9 @@
       fileInfo.style.display = 'block';
       statusText.textContent = '';
       downloadLink.style.display = 'none';
+      logArea.textContent = '';
       uploadArea.querySelector('p').textContent =
         'PDF selected! Drop another or click to change';
-    }
-
-    function getCompressionSettings() {
-      switch (compressionSel.value) {
-        case 'low':    return { quality: 0.8, scale: 1.0   };
-        case 'medium': return { quality: 0.5, scale: 0.75  };
-        case 'high':   return { quality: 0.3, scale: 0.5   };
-        default:       return { quality: 0.5, scale: 1.0   };
-      }
     }
 
     async function compressPDF() {
@@ -183,68 +188,32 @@
       try {
         _setStatus('Initializing…', 5);
         compressBtn.disabled = true;
+        logArea.textContent = '';
 
-        // Read the file
         const data = await selectedFile.arrayBuffer();
-        // Load original for page-copying
-        const srcPdf = await PDFDocument.load(data);
-
-        // Load PDF.js
         _setStatus('Loading PDF…', 15);
         const pdfJS = await pdfjsLib.getDocument({ data }).promise;
-        const pageCount = pdfJS.numPages;
 
-        // Create new PDF
-        const outPdf = await PDFDocument.create();
-        const { quality, scale } = getCompressionSettings();
+        const fileSize = selectedFile.size;
+        const targetRatio = getTargetRatio();
+        _log(`Target size ratio: ${(targetRatio*100).toFixed(0)}%`);
 
-        for (let i = 1; i <= pageCount; i++) {
-          const pageJS = await pdfJS.getPage(i);
+        _setStatus('Compressing…', 20);
+        const blob = await iterativeCompress(pdfJS, fileSize, targetRatio);
 
-          // If page has text and we're not in "high" mode, just copy it
-          const textContent = await pageJS.getTextContent();
-          if (textContent.items.length > 0 && compressionSel.value !== 'high') {
-            const [copied] = await outPdf.copyPages(srcPdf, [i - 1]);
-            outPdf.addPage(copied);
-            continue;
-          }
-
-          // Otherwise rasterize and JPEG-compress
-          const vp = pageJS.getViewport({ scale });
-          const canvas = document.createElement('canvas');
-          canvas.width = vp.width;
-          canvas.height = vp.height;
-          const ctx = canvas.getContext('2d');
-
-          _setStatus(`Rendering page ${i}/${pageCount}…`, 20 + (i-1)*(60/pageCount));
-          await pageJS.render({ canvasContext: ctx, viewport: vp }).promise;
-
-          _setStatus(`Encoding page ${i}/${pageCount}…`, 25 + (i-1)*(60/pageCount));
-          const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
-          const jpgBytes    = await fetch(jpegDataUrl).then(r => r.arrayBuffer());
-          const jpg         = await outPdf.embedJpg(jpgBytes);
-
-          const { width, height } = jpg.scale(1);
-          const newPage = outPdf.addPage([width, height]);
-          newPage.drawImage(jpg, { x: 0, y: 0, width, height });
-        }
-
-        _setStatus('Saving compressed PDF…', 90);
-        const outBytes = await outPdf.save({ useObjectStreams: true });
+        _setStatus('Finalizing…', 90);
         _setStatus('Done!', 100);
 
-        // Cleanup old URL
         if (lastObjectURL) URL.revokeObjectURL(lastObjectURL);
-        const blob = new Blob([outBytes], { type: 'application/pdf' });
         lastObjectURL = URL.createObjectURL(blob);
 
         downloadLink.href = lastObjectURL;
         downloadLink.download = getCompressedFileName(selectedFile.name);
         downloadLink.style.display = 'block';
 
-        const savings = ((selectedFile.size - blob.size)/selectedFile.size*100).toFixed(1);
+        const savings = ((fileSize - blob.size)/fileSize*100).toFixed(1);
         statusText.textContent =
-          `Reduced by ${savings}% — ${formatFileSize(selectedFile.size)} → ${formatFileSize(blob.size)}`;
+          `Reduced by ${savings}% — ${formatFileSize(fileSize)} → ${formatFileSize(blob.size)}`;
 
       } catch (err) {
         console.error(err);
@@ -254,6 +223,66 @@
       }
     }
 
+    async function iterativeCompress(pdfJS, fileSize, targetRatio) {
+      let quality = targetRatio;
+      let blob = null;
+      const maxIter = 3;
+
+      for (let i = 1; i <= maxIter; i++) {
+        _log(`\nIteration ${i}: trying quality=${quality.toFixed(2)}`);
+        blob = await compressPages(pdfJS, quality);
+        const ratio = blob.size / fileSize;
+        _log(`→ size=${formatFileSize(blob.size)} (${(ratio*100).toFixed(1)}%)`);
+
+        // stop if within ±5% of target
+        if (Math.abs(ratio - targetRatio) < 0.05) {
+          _log(`Within tolerance (±5%).`);
+          break;
+        }
+        // adjust quality estimate
+        quality = quality * (targetRatio / ratio);
+        quality = Math.min(1, Math.max(0.1, quality));
+      }
+      return blob;
+    }
+
+    async function compressPages(pdfJS, quality) {
+      const pageCount = pdfJS.numPages;
+      const outPdf = await PDFDocument.create();
+
+      for (let i = 1; i <= pageCount; i++) {
+        const page = await pdfJS.getPage(i);
+        const vp = page.getViewport({ scale: 1.0 });
+        const canvas = document.createElement('canvas');
+        canvas.width = vp.width;
+        canvas.height = vp.height;
+        const ctx = canvas.getContext('2d');
+
+        _setStatus(`Rendering ${i}/${pageCount}…`, 20 + (i-1)*(50/pageCount));
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+        _setStatus(`Encoding ${i}/${pageCount} at q=${quality.toFixed(2)}…`, 25 + (i-1)*(50/pageCount));
+        const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
+        const jpgBytes   = await fetch(jpegDataUrl).then(r => r.arrayBuffer());
+        const jpg        = await outPdf.embedJpg(jpgBytes);
+
+        const { width, height } = jpg.scale(1);
+        const newPage = outPdf.addPage([width, height]);
+        newPage.drawImage(jpg, { x: 0, y: 0, width, height });
+      }
+
+      _setStatus('Merging pages…', 80);
+      const outBytes = await outPdf.save({ useObjectStreams: true });
+      return new Blob([outBytes], { type: 'application/pdf' });
+    }
+
+    function getTargetRatio() {
+      switch (compressionSel.value) {
+        case 'low':    return 0.8;
+        case 'high':   return 0.2;
+        default:       return 0.5;
+      }
+    }
     function formatFileSize(b) {
       if (b < 1024)      return b + ' bytes';
       if (b < 1048576)   return (b/1024).toFixed(1) + ' KB';
@@ -272,6 +301,10 @@
       statusText.textContent = txt;
       progressBar.style.display = 'block';
       progressBar.value = pct;
+    }
+    function _log(msg) {
+      console.log(msg);
+      logArea.textContent += msg + '\n';
     }
   </script>
 </body>
