@@ -226,7 +226,7 @@
     async function iterativeCompress(pdfJS, fileSize, targetRatio) {
       let quality = targetRatio;
       let blob = null;
-      const maxIter = 3;
+      const maxIter = 5;
 
       for (let i = 1; i <= maxIter; i++) {
         _log(`\nIteration ${i}: trying quality=${quality.toFixed(2)}`);
