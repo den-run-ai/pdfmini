@@ -169,6 +169,15 @@
         'PDF selected! Drop another or click to change';
     }
 
+    function getCompressionSettings() {
+      switch (compressionSel.value) {
+        case 'low':    return { quality: 0.8, scale: 1.0   };
+        case 'medium': return { quality: 0.5, scale: 0.75  };
+        case 'high':   return { quality: 0.3, scale: 0.5   };
+        default:       return { quality: 0.5, scale: 1.0   };
+      }
+    }
+
     async function compressPDF() {
       if (!selectedFile) return;
       try {
@@ -177,6 +186,8 @@
 
         // Read the file
         const data = await selectedFile.arrayBuffer();
+        // Load original for page-copying
+        const srcPdf = await PDFDocument.load(data);
 
         // Load PDF.js
         _setStatus('Loading PDF…', 15);
@@ -185,24 +196,33 @@
 
         // Create new PDF
         const outPdf = await PDFDocument.create();
-        const quality = getCompressionQuality();
-        const scale = 1.0;
+        const { quality, scale } = getCompressionSettings();
 
         for (let i = 1; i <= pageCount; i++) {
-          const page = await pdfJS.getPage(i);
-          const vp = page.getViewport({ scale });
+          const pageJS = await pdfJS.getPage(i);
+
+          // If page has text and we're not in "high" mode, just copy it
+          const textContent = await pageJS.getTextContent();
+          if (textContent.items.length > 0 && compressionSel.value !== 'high') {
+            const [copied] = await outPdf.copyPages(srcPdf, [i - 1]);
+            outPdf.addPage(copied);
+            continue;
+          }
+
+          // Otherwise rasterize and JPEG-compress
+          const vp = pageJS.getViewport({ scale });
           const canvas = document.createElement('canvas');
           canvas.width = vp.width;
           canvas.height = vp.height;
           const ctx = canvas.getContext('2d');
 
           _setStatus(`Rendering page ${i}/${pageCount}…`, 20 + (i-1)*(60/pageCount));
-          await page.render({ canvasContext: ctx, viewport: vp }).promise;
+          await pageJS.render({ canvasContext: ctx, viewport: vp }).promise;
 
           _setStatus(`Encoding page ${i}/${pageCount}…`, 25 + (i-1)*(60/pageCount));
           const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
-          const jpgBytes = await fetch(jpegDataUrl).then(r => r.arrayBuffer());
-          const jpg = await outPdf.embedJpg(jpgBytes);
+          const jpgBytes    = await fetch(jpegDataUrl).then(r => r.arrayBuffer());
+          const jpg         = await outPdf.embedJpg(jpgBytes);
 
           const { width, height } = jpg.scale(1);
           const newPage = outPdf.addPage([width, height]);
@@ -223,7 +243,7 @@
         downloadLink.style.display = 'block';
 
         const savings = ((selectedFile.size - blob.size)/selectedFile.size*100).toFixed(1);
-        statusText.textContent = 
+        statusText.textContent =
           `Reduced by ${savings}% — ${formatFileSize(selectedFile.size)} → ${formatFileSize(blob.size)}`;
 
       } catch (err) {
@@ -234,13 +254,6 @@
       }
     }
 
-    function getCompressionQuality() {
-      switch (compressionSel.value) {
-        case 'low':    return 0.8;
-        case 'high':   return 0.3;
-        default:       return 0.5;
-      }
-    }
     function formatFileSize(b) {
       if (b < 1024)      return b + ' bytes';
       if (b < 1048576)   return (b/1024).toFixed(1) + ' KB';
