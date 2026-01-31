@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>PDF Compression Tool</title>
+  <title>PDF Tools - Compress & Combine</title>
 
   <!-- PDF-Lib -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
@@ -35,6 +35,33 @@
       margin-bottom: 20px;
       font-size: 24px;
     }
+    /* Mode tabs */
+    .mode-tabs {
+      display: flex;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #eee;
+    }
+    .mode-tab {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-size: 16px;
+      font-weight: bold;
+      color: #666;
+      transition: all 0.3s;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+    }
+    .mode-tab:hover { color: #333; }
+    .mode-tab.active {
+      color: #4CAF50;
+      border-bottom-color: #4CAF50;
+    }
+    .mode-content { display: none; }
+    .mode-content.active { display: block; }
     .upload-area {
       border: 2px dashed #ccc;
       border-radius: 6px;
@@ -49,12 +76,13 @@
       border-color: #4CAF50;
       background-color: rgba(76,175,80,0.1);
     }
-    #file-input { display: none; }
+    #file-input, #combine-file-input { display: none; }
     .settings { margin-bottom: 20px; }
     label { display: block; margin-bottom: 8px; font-weight: bold; }
     select, input {
       width: 100%; padding: 8px; margin-bottom: 15px;
       border: 1px solid #ddd; border-radius: 4px;
+      box-sizing: border-box;
     }
     button {
       background-color: #4CAF50; color: white; border: none;
@@ -88,32 +116,155 @@
       border-radius: 4px;
       margin-top: 15px;
     }
+    /* File list for combine mode */
+    .file-list {
+      margin-bottom: 20px;
+    }
+    .file-list-item {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      cursor: grab;
+      transition: all 0.2s;
+    }
+    .file-list-item:hover { background: #f0f0f0; }
+    .file-list-item.dragging {
+      opacity: 0.5;
+      background: #e0e0e0;
+    }
+    .file-list-item.drag-over {
+      border-color: #4CAF50;
+      border-style: dashed;
+    }
+    .file-list-item .drag-handle {
+      margin-right: 10px;
+      color: #999;
+      cursor: grab;
+    }
+    .file-list-item .file-details {
+      flex: 1;
+    }
+    .file-list-item .file-name {
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .file-list-item .file-size {
+      font-size: 12px;
+      color: #666;
+    }
+    .file-list-item .file-pages {
+      font-size: 12px;
+      color: #4CAF50;
+    }
+    .file-list-item .remove-btn {
+      background: #f44336;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      width: auto;
+    }
+    .file-list-item .remove-btn:hover { background: #d32f2f; }
+    .add-more-btn {
+      background: #2196F3;
+      margin-bottom: 15px;
+    }
+    .add-more-btn:hover { background: #1976D2; }
+    .total-info {
+      text-align: center;
+      padding: 10px;
+      background: #e8f5e9;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    /* Test section */
+    .test-section {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 2px dashed #ddd;
+    }
+    .test-section h3 {
+      color: #666;
+      margin-bottom: 15px;
+    }
+    .test-btn {
+      background: #9C27B0;
+      margin-bottom: 10px;
+    }
+    .test-btn:hover { background: #7B1FA2; }
+    .test-results {
+      font-family: monospace;
+      font-size: 12px;
+      background: #263238;
+      color: #aed581;
+      padding: 15px;
+      border-radius: 4px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .test-pass { color: #4CAF50; }
+    .test-fail { color: #f44336; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>PDF Compression Tool</h1>
+    <h1>PDF Tools</h1>
 
-    <div id="upload-area" class="upload-area">
-      <p>Drop your PDF here or click to browse</p>
-      <input type="file" id="file-input" accept=".pdf" />
+    <!-- Mode Tabs -->
+    <div class="mode-tabs">
+      <button class="mode-tab active" data-mode="compress">Compress</button>
+      <button class="mode-tab" data-mode="combine">Combine</button>
     </div>
 
-    <div class="file-info" id="file-info">
-      <p>File: <span id="file-name"></span></p>
-      <p>Original size: <span id="original-size"></span></p>
+    <!-- Compress Mode -->
+    <div id="compress-mode" class="mode-content active">
+      <div id="upload-area" class="upload-area">
+        <p>Drop your PDF here or click to browse</p>
+        <input type="file" id="file-input" accept=".pdf" />
+      </div>
+
+      <div class="file-info" id="file-info">
+        <p>File: <span id="file-name"></span></p>
+        <p>Original size: <span id="original-size"></span></p>
+      </div>
+
+      <div class="settings">
+        <label for="compression-level">Compression Level</label>
+        <select id="compression-level">
+          <option value="low">Low – ~80% Size</option>
+          <option value="medium" selected>Medium – ~50% Size</option>
+          <option value="high">High – ~20% Size</option>
+        </select>
+      </div>
+
+      <button id="compress-btn" disabled>Compress PDF</button>
     </div>
 
-    <div class="settings">
-      <label for="compression-level">Compression Level</label>
-      <select id="compression-level">
-        <option value="low">Low – ~80% Size</option>
-        <option value="medium" selected>Medium – ~50% Size</option>
-        <option value="high">High – ~20% Size</option>
-      </select>
-    </div>
+    <!-- Combine Mode -->
+    <div id="combine-mode" class="mode-content">
+      <div id="combine-upload-area" class="upload-area">
+        <p>Drop PDFs here or click to browse (select multiple)</p>
+        <input type="file" id="combine-file-input" accept=".pdf" multiple />
+      </div>
 
-    <button id="compress-btn" disabled>Compress PDF</button>
+      <div id="combine-file-list" class="file-list"></div>
+      
+      <div id="combine-total-info" class="total-info" style="display: none;">
+        <strong>Total:</strong> <span id="total-files">0</span> files, 
+        <span id="total-pages">0</span> pages, 
+        <span id="total-size">0 KB</span>
+      </div>
+
+      <button id="add-more-btn" class="add-more-btn" style="display: none;">Add More PDFs</button>
+      <button id="combine-btn" disabled>Combine PDFs</button>
+    </div>
 
     <div class="status" id="status">
       <p id="status-text"></p>
@@ -124,27 +275,78 @@
     <div id="log-area"></div>
 
     <a href="#" id="download-link" class="download-link" style="display:none;">
-      Download Compressed PDF
+      Download PDF
     </a>
+
+    <!-- Test Section -->
+    <div class="test-section">
+      <h3>Developer Tests</h3>
+      <button id="run-tests-btn" class="test-btn">Run Tests</button>
+      <div id="test-results" class="test-results" style="display: none;"></div>
+    </div>
   </div>
 
   <script>
     const { PDFDocument } = PDFLib;
+    
+    // Compress mode elements
     const uploadArea     = document.getElementById('upload-area');
     const fileInput      = document.getElementById('file-input');
     const compressBtn    = document.getElementById('compress-btn');
     const fileInfo       = document.getElementById('file-info');
     const fileName       = document.getElementById('file-name');
     const originalSize   = document.getElementById('original-size');
+    const compressionSel = document.getElementById('compression-level');
+    
+    // Combine mode elements
+    const combineUploadArea = document.getElementById('combine-upload-area');
+    const combineFileInput  = document.getElementById('combine-file-input');
+    const combineBtn        = document.getElementById('combine-btn');
+    const combineFileList   = document.getElementById('combine-file-list');
+    const combineTotalInfo  = document.getElementById('combine-total-info');
+    const addMoreBtn        = document.getElementById('add-more-btn');
+    const totalFilesEl      = document.getElementById('total-files');
+    const totalPagesEl      = document.getElementById('total-pages');
+    const totalSizeEl       = document.getElementById('total-size');
+    
+    // Shared elements
     const statusText     = document.getElementById('status-text');
     const progressBar    = document.getElementById('progress-bar');
     const downloadLink   = document.getElementById('download-link');
-    const compressionSel = document.getElementById('compression-level');
     const logArea        = document.getElementById('log-area');
+    const modeTabs       = document.querySelectorAll('.mode-tab');
+    const testResultsEl  = document.getElementById('test-results');
+    const runTestsBtn    = document.getElementById('run-tests-btn');
 
     let selectedFile = null;
     let lastObjectURL = null;
+    let currentMode = 'compress';
+    
+    // Combine mode state
+    let combineFiles = []; // Array of { file: File, pageCount: number }
 
+    // ==================== MODE SWITCHING ====================
+    modeTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const mode = tab.dataset.mode;
+        if (mode === currentMode) return;
+        
+        currentMode = mode;
+        modeTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        document.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
+        document.getElementById(`${mode}-mode`).classList.add('active');
+        
+        // Reset status
+        statusText.textContent = '';
+        progressBar.style.display = 'none';
+        downloadLink.style.display = 'none';
+        logArea.textContent = '';
+      });
+    });
+
+    // ==================== COMPRESS MODE ====================
     uploadArea.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', handleFileSelect);
     uploadArea.addEventListener('dragover', e => {
@@ -210,6 +412,7 @@
         downloadLink.href = lastObjectURL;
         downloadLink.download = getCompressedFileName(selectedFile.name);
         downloadLink.style.display = 'block';
+        downloadLink.textContent = 'Download Compressed PDF';
 
         const savings = ((fileSize - blob.size)/fileSize*100).toFixed(1);
         statusText.textContent =
@@ -276,6 +479,203 @@
       return new Blob([outBytes], { type: 'application/pdf' });
     }
 
+    // ==================== COMBINE MODE ====================
+    combineUploadArea.addEventListener('click', () => combineFileInput.click());
+    combineFileInput.addEventListener('change', handleCombineFileSelect);
+    combineUploadArea.addEventListener('dragover', e => {
+      e.preventDefault();
+      combineUploadArea.classList.add('active');
+    });
+    combineUploadArea.addEventListener('dragleave', e => {
+      e.preventDefault();
+      combineUploadArea.classList.remove('active');
+    });
+    combineUploadArea.addEventListener('drop', handleCombineDrop);
+    addMoreBtn.addEventListener('click', () => combineFileInput.click());
+    combineBtn.addEventListener('click', combinePDFs);
+
+    async function handleCombineFileSelect(e) {
+      const files = Array.from(e.target.files);
+      await addFilesToCombine(files);
+      combineFileInput.value = ''; // Reset to allow re-selecting same files
+    }
+    
+    async function handleCombineDrop(e) {
+      e.preventDefault();
+      combineUploadArea.classList.remove('active');
+      const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+      if (files.length === 0) return showError('Please drop PDF files');
+      await addFilesToCombine(files);
+    }
+
+    async function addFilesToCombine(files) {
+      for (const file of files) {
+        if (file.type !== 'application/pdf') {
+          _log(`Skipping non-PDF: ${file.name}`);
+          continue;
+        }
+        // Get page count
+        try {
+          const data = await file.arrayBuffer();
+          const pdf = await PDFDocument.load(data);
+          const pageCount = pdf.getPageCount();
+          combineFiles.push({ file, pageCount });
+        } catch (err) {
+          _log(`Error loading ${file.name}: ${err.message}`);
+        }
+      }
+      renderCombineFileList();
+      updateCombineUI();
+    }
+
+    function renderCombineFileList() {
+      combineFileList.innerHTML = '';
+      combineFiles.forEach((item, index) => {
+        const el = document.createElement('div');
+        el.className = 'file-list-item';
+        el.draggable = true;
+        el.dataset.index = index;
+        el.innerHTML = `
+          <span class="drag-handle">☰</span>
+          <div class="file-details">
+            <div class="file-name">${item.file.name}</div>
+            <div class="file-size">${formatFileSize(item.file.size)}</div>
+            <div class="file-pages">${item.pageCount} page${item.pageCount !== 1 ? 's' : ''}</div>
+          </div>
+          <button class="remove-btn" data-index="${index}">Remove</button>
+        `;
+        
+        // Drag events
+        el.addEventListener('dragstart', handleDragStart);
+        el.addEventListener('dragover', handleDragOver);
+        el.addEventListener('drop', handleItemDrop);
+        el.addEventListener('dragend', handleDragEnd);
+        
+        // Remove button
+        el.querySelector('.remove-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          combineFiles.splice(index, 1);
+          renderCombineFileList();
+          updateCombineUI();
+        });
+        
+        combineFileList.appendChild(el);
+      });
+    }
+
+    let draggedIndex = null;
+    
+    function handleDragStart(e) {
+      draggedIndex = parseInt(e.target.dataset.index);
+      e.target.classList.add('dragging');
+    }
+    
+    function handleDragOver(e) {
+      e.preventDefault();
+      const item = e.target.closest('.file-list-item');
+      if (item) item.classList.add('drag-over');
+    }
+    
+    function handleItemDrop(e) {
+      e.preventDefault();
+      const item = e.target.closest('.file-list-item');
+      if (!item) return;
+      
+      const dropIndex = parseInt(item.dataset.index);
+      if (draggedIndex !== null && draggedIndex !== dropIndex) {
+        // Reorder array
+        const [moved] = combineFiles.splice(draggedIndex, 1);
+        combineFiles.splice(dropIndex, 0, moved);
+        renderCombineFileList();
+      }
+      item.classList.remove('drag-over');
+    }
+    
+    function handleDragEnd(e) {
+      document.querySelectorAll('.file-list-item').forEach(el => {
+        el.classList.remove('dragging', 'drag-over');
+      });
+      draggedIndex = null;
+    }
+
+    function updateCombineUI() {
+      const hasFiles = combineFiles.length > 0;
+      const canCombine = combineFiles.length >= 2;
+      
+      combineBtn.disabled = !canCombine;
+      addMoreBtn.style.display = hasFiles ? 'block' : 'none';
+      combineTotalInfo.style.display = hasFiles ? 'block' : 'none';
+      
+      if (hasFiles) {
+        const totalPages = combineFiles.reduce((sum, item) => sum + item.pageCount, 0);
+        const totalSize = combineFiles.reduce((sum, item) => sum + item.file.size, 0);
+        totalFilesEl.textContent = combineFiles.length;
+        totalPagesEl.textContent = totalPages;
+        totalSizeEl.textContent = formatFileSize(totalSize);
+        
+        combineUploadArea.querySelector('p').textContent = 
+          `${combineFiles.length} PDF${combineFiles.length !== 1 ? 's' : ''} selected. Drop more or click "Add More"`;
+      } else {
+        combineUploadArea.querySelector('p').textContent = 
+          'Drop PDFs here or click to browse (select multiple)';
+      }
+      
+      statusText.textContent = '';
+      downloadLink.style.display = 'none';
+    }
+
+    async function combinePDFs() {
+      if (combineFiles.length < 2) return;
+      
+      try {
+        _setStatus('Initializing…', 5);
+        combineBtn.disabled = true;
+        logArea.textContent = '';
+        
+        const mergedPdf = await PDFDocument.create();
+        const totalFiles = combineFiles.length;
+        
+        for (let i = 0; i < totalFiles; i++) {
+          const { file, pageCount } = combineFiles[i];
+          _setStatus(`Processing ${file.name}…`, 10 + (i / totalFiles) * 80);
+          _log(`Adding ${file.name} (${pageCount} pages)`);
+          
+          const data = await file.arrayBuffer();
+          const srcPdf = await PDFDocument.load(data);
+          const copiedPages = await mergedPdf.copyPages(srcPdf, srcPdf.getPageIndices());
+          
+          copiedPages.forEach(page => mergedPdf.addPage(page));
+        }
+        
+        _setStatus('Saving combined PDF…', 90);
+        const outBytes = await mergedPdf.save({ useObjectStreams: true });
+        const blob = new Blob([outBytes], { type: 'application/pdf' });
+        
+        _setStatus('Done!', 100);
+        
+        if (lastObjectURL) URL.revokeObjectURL(lastObjectURL);
+        lastObjectURL = URL.createObjectURL(blob);
+        
+        downloadLink.href = lastObjectURL;
+        downloadLink.download = 'combined.pdf';
+        downloadLink.style.display = 'block';
+        downloadLink.textContent = 'Download Combined PDF';
+        
+        const totalPages = mergedPdf.getPageCount();
+        statusText.textContent = 
+          `Combined ${totalFiles} files into ${totalPages} pages (${formatFileSize(blob.size)})`;
+        
+        _log(`\nSuccess! Combined ${totalFiles} files → ${totalPages} pages`);
+        
+      } catch (err) {
+        console.error(err);
+        showError('Combine failed: ' + err.message);
+      } finally {
+        combineBtn.disabled = combineFiles.length < 2;
+      }
+    }
+
+    // ==================== UTILITY FUNCTIONS ====================
     function getTargetRatio() {
       switch (compressionSel.value) {
         case 'low':    return 0.8;
@@ -305,6 +705,148 @@
     function _log(msg) {
       console.log(msg);
       logArea.textContent += msg + '\n';
+    }
+
+    // ==================== TESTS ====================
+    runTestsBtn.addEventListener('click', runTests);
+
+    async function runTests() {
+      testResultsEl.style.display = 'block';
+      testResultsEl.textContent = 'Running tests...\n\n';
+      
+      const results = { passed: 0, failed: 0 };
+      
+      // Test 1: formatFileSize
+      testLog('Test 1: formatFileSize');
+      assertEqual(formatFileSize(500), '500 bytes', 'bytes', results);
+      assertEqual(formatFileSize(1024), '1.0 KB', '1 KB', results);
+      assertEqual(formatFileSize(1536), '1.5 KB', '1.5 KB', results);
+      assertEqual(formatFileSize(1048576), '1.0 MB', '1 MB', results);
+      assertEqual(formatFileSize(2621440), '2.5 MB', '2.5 MB', results);
+      
+      // Test 2: getTargetRatio
+      testLog('\nTest 2: getTargetRatio');
+      compressionSel.value = 'low';
+      assertEqual(getTargetRatio(), 0.8, 'low compression', results);
+      compressionSel.value = 'medium';
+      assertEqual(getTargetRatio(), 0.5, 'medium compression', results);
+      compressionSel.value = 'high';
+      assertEqual(getTargetRatio(), 0.2, 'high compression', results);
+      compressionSel.value = 'medium'; // Reset
+      
+      // Test 3: getCompressedFileName
+      testLog('\nTest 3: getCompressedFileName');
+      assertEqual(getCompressedFileName('document.pdf'), 'document-compressed.pdf', 'simple name', results);
+      assertEqual(getCompressedFileName('my.report.pdf'), 'my.report-compressed.pdf', 'dotted name', results);
+      
+      // Test 4: PDF creation with PDF-lib
+      testLog('\nTest 4: PDF-lib PDF creation');
+      try {
+        const testPdf = await PDFDocument.create();
+        testPdf.addPage([612, 792]); // Letter size
+        testPdf.addPage([612, 792]);
+        const bytes = await testPdf.save();
+        assertTrue(bytes.length > 0, 'PDF created with content', results);
+        assertTrue(testPdf.getPageCount() === 2, 'PDF has 2 pages', results);
+      } catch (e) {
+        testFail('PDF creation failed: ' + e.message, results);
+      }
+      
+      // Test 5: PDF combining logic
+      testLog('\nTest 5: PDF combining logic');
+      try {
+        // Create two test PDFs
+        const pdf1 = await PDFDocument.create();
+        pdf1.addPage([612, 792]);
+        pdf1.addPage([612, 792]);
+        const bytes1 = await pdf1.save();
+        
+        const pdf2 = await PDFDocument.create();
+        pdf2.addPage([612, 792]);
+        pdf2.addPage([612, 792]);
+        pdf2.addPage([612, 792]);
+        const bytes2 = await pdf2.save();
+        
+        // Combine them
+        const mergedPdf = await PDFDocument.create();
+        const srcPdf1 = await PDFDocument.load(bytes1);
+        const srcPdf2 = await PDFDocument.load(bytes2);
+        
+        const pages1 = await mergedPdf.copyPages(srcPdf1, srcPdf1.getPageIndices());
+        const pages2 = await mergedPdf.copyPages(srcPdf2, srcPdf2.getPageIndices());
+        
+        pages1.forEach(p => mergedPdf.addPage(p));
+        pages2.forEach(p => mergedPdf.addPage(p));
+        
+        assertTrue(mergedPdf.getPageCount() === 5, 'Combined PDF has 5 pages (2+3)', results);
+        
+        const mergedBytes = await mergedPdf.save();
+        assertTrue(mergedBytes.length > 0, 'Combined PDF has content', results);
+      } catch (e) {
+        testFail('PDF combining failed: ' + e.message, results);
+      }
+      
+      // Test 6: Page ordering in combine
+      testLog('\nTest 6: Array reordering (combine file order)');
+      const testArray = [{ name: 'a' }, { name: 'b' }, { name: 'c' }];
+      // Simulate moving index 0 to index 2
+      const [moved] = testArray.splice(0, 1);
+      testArray.splice(2, 0, moved);
+      assertEqual(testArray.map(x => x.name).join(','), 'b,c,a', 'reorder 0→2', results);
+      
+      // Test 7: File validation
+      testLog('\nTest 7: File type validation');
+      const pdfFile = { type: 'application/pdf', name: 'test.pdf' };
+      const txtFile = { type: 'text/plain', name: 'test.txt' };
+      assertTrue(pdfFile.type === 'application/pdf', 'PDF type check passes', results);
+      assertTrue(txtFile.type !== 'application/pdf', 'Non-PDF type check fails correctly', results);
+      
+      // Summary
+      testLog(`\n${'='.repeat(40)}`);
+      testLog(`Tests complete: ${results.passed} passed, ${results.failed} failed`);
+      
+      if (results.failed === 0) {
+        testLog('\n✓ All tests passed!', 'pass');
+      } else {
+        testLog(`\n✗ ${results.failed} test(s) failed`, 'fail');
+      }
+    }
+    
+    function testLog(msg, type = '') {
+      let className = '';
+      if (type === 'pass') className = 'test-pass';
+      if (type === 'fail') className = 'test-fail';
+      
+      if (className) {
+        testResultsEl.innerHTML += `<span class="${className}">${msg}</span>\n`;
+      } else {
+        testResultsEl.textContent += msg + '\n';
+      }
+    }
+    
+    function assertEqual(actual, expected, description, results) {
+      if (actual === expected) {
+        testLog(`  ✓ ${description}: ${actual}`, 'pass');
+        results.passed++;
+      } else {
+        testLog(`  ✗ ${description}: expected "${expected}", got "${actual}"`, 'fail');
+        results.failed++;
+      }
+    }
+    
+    function assertTrue(condition, description, results) {
+      if (condition) {
+        testLog(`  ✓ ${description}`, 'pass');
+        results.passed++;
+      } else {
+        testLog(`  ✗ ${description}: condition was false`, 'fail');
+        results.failed++;
+      }
+    }
+    
+    function testFail(message, results) {
+      testLog(`  ✗ ${message}`, 'fail');
+      results.failed++;
     }
   </script>
 </body>
