@@ -18,9 +18,11 @@ device and never uploaded.
   images* for scans.
 - **Combine** – merge PDFs in any order (drag to reorder on desktop, arrow
   buttons on touch screens), then compress the result in one tap.
-- **Same results everywhere** – pdfmini ships its own JPEG encoder, so a
-  given file and setting produce byte-identical images on iPhone, Android,
-  Mac and Windows (browsers' built-in encoders differ a lot).
+- **Same results everywhere** – browsers use different built-in JPEG
+  encoders (Safari uses Apple's, Chrome and Firefox use libjpeg-turbo), so
+  the same quality setting gives different files. pdfmini ships its own
+  encoder, which produces byte-identical output in every browser (checked
+  in CI), so sizes and quality match on iPhone, Android, Mac and Windows.
 
 ## Compression levels
 
@@ -97,7 +99,7 @@ npm install
 npm run serve            # http://localhost:8080
 npx playwright install   # once, to get Chromium, Firefox and WebKit
 npm test                 # all browsers + mobile emulation
-npm run test:chromium    # just Chromium (desktop + mobile)
+npm run test:chromium    # unit tests + Chromium (desktop and mobile)
 ```
 
 Tests serve the CDN libraries from `node_modules`, so they run offline
@@ -136,8 +138,13 @@ To repeat the measurements:
 node tools/run-engine.mjs --level balanced --out out/ my.pdf   # run the engine
 python tools/quality.py my.pdf out/my.pdf                       # SSIM, text and qpdf checks
 python tools/calibrate.py --out cal/ --dpi-eval 110,200 \
-  --settings "100:55,144:72,200:82" --gs screen,ebook,printer corpus/*.pdf
+  --settings "110:55,144:72,200:82" --gs screen,ebook,printer corpus/*.pdf
 ```
+
+`run-engine.mjs --cpu-throttle 4` approximates a mid-range phone,
+`tools/profile-engine.mjs` prints a CPU profile, and
+`tools/screenshots.mjs` captures the UI on mobile and desktop in light and
+dark mode.
 
 The Python tools need poppler-utils, numpy, pillow, scikit-image and
 pikepdf (and Ghostscript for the reference presets).

@@ -507,10 +507,10 @@
     return out;
   }
 
-  /** Inspect a JPEG header: {components, adobe, transform, quality} or null. */
+  /** Inspect a JPEG header: {components, quality} or null. */
   function jpegInfo(bytes) {
     if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
-    const info = { components: 0, adobe: false, transform: -1, quality: 0, progressive: false };
+    const info = { components: 0, quality: 0 };
     let i = 2;
     while (i + 4 <= bytes.length && bytes[i] === 0xff) {
       const marker = bytes[i + 1];
@@ -518,10 +518,8 @@
       const len = (bytes[i + 2] << 8) | bytes[i + 3];
       const seg = i + 4;
       if (marker === 0xdb && !info.quality) info.quality = estimateQuality(bytes, seg, seg + len - 2);
-      else if (marker === 0xee && len >= 12 && ascii(bytes, seg, seg + 5) === 'Adobe') { info.adobe = true; info.transform = bytes[seg + 11]; } else if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-        info.components = bytes[seg + 5];
-        info.progressive = marker === 0xc2;
-      } else if (marker === 0xda) break;
+      else if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) info.components = bytes[seg + 5];
+      else if (marker === 0xda) break;
       i += 2 + len;
     }
     return info.components ? info : null;
@@ -1717,6 +1715,5 @@
     pageCount,
     isPdf,
     loadPdfjs,
-    _internal: { scanImagePlacements, collectImages, targetSize, stripJpegMetadata, jpegInfo, unpredict, tokenize, estimateQuality },
   };
 })(typeof window !== 'undefined' ? window : globalThis);

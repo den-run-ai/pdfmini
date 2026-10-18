@@ -7,8 +7,7 @@
   "scripts": {
     "serve": "node tools/serve.mjs",
     "test": "playwright test",
-    "test:chromium": "playwright test --project=chromium --project=mobile-chrome",
-    "calibrate": "node tools/calibrate.mjs"
+    "test:chromium": "playwright test --project=unit --project=chromium --project=mobile-chrome"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
