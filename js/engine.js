@@ -33,7 +33,8 @@
   };
 
   const PDFJS_VERSION = '6.4.299';
-  // Self-hosters can point this at their own copy of the pdfjs-dist package.
+  // Self-hosters can point this at their own copy of the pdfjs-dist package
+  // (and must allow it in the Content-Security-Policy in index.html).
   const PDFJS_BASE = (root.PDFMINI_CONFIG && root.PDFMINI_CONFIG.pdfjsBase) ||
     `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/`;
   // Subresource integrity for the PDF.js modules (verified before import).

@@ -77,3 +77,24 @@ test.describe('JPEG encoder', () => {
     expect(() => jpeg.encode(new Uint8Array(10), 10, 10)).toThrow();
   });
 });
+
+test.describe('pinned libraries', () => {
+  test('CDN URLs, integrity hashes and CSP match node_modules', async () => {
+    const fs = await import('node:fs');
+    const { PINNED, version, integrity } = await import('../tools/sri.mjs');
+    const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+    const engine = fs.readFileSync(new URL('../js/engine.js', import.meta.url), 'utf8');
+    const libVersion = version('pdf-lib');
+    const jsVersion = version('pdfjs-dist');
+    const [, libFile] = PINNED[0];
+    // pdf-lib <script> tag with SRI.
+    expect(html).toContain(`src="https://cdn.jsdelivr.net/npm/pdf-lib@${libVersion}/${libFile}" integrity="${integrity('pdf-lib', libFile)}"`);
+    // PDF.js version and module hashes in the engine.
+    expect(engine).toContain(`const PDFJS_VERSION = '${jsVersion}';`);
+    for (const [pkg, file] of PINNED.slice(1)) expect(engine).toContain(`['${file}', '${integrity(pkg, file)}']`);
+    // The Content-Security-Policy allows exactly these package paths.
+    const csp = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)[1];
+    expect(csp).toContain(`https://cdn.jsdelivr.net/npm/pdf-lib@${libVersion}/`);
+    expect(csp.match(/pdfjs-dist@([\d.]+)\//g).every((m) => m === `pdfjs-dist@${jsVersion}/`)).toBe(true);
+  });
+});

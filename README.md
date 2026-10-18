@@ -64,7 +64,10 @@ See [Calibration](#calibration) for how these values were chosen.
 Everything runs locally in the page. The only network requests are for
 the open-source libraries (pdf-lib, and PDF.js when needed) from the
 jsDelivr CDN, pinned to exact versions and checked with Subresource
-Integrity. Your settings are remembered in your browser's local storage.
+Integrity. A Content-Security-Policy enforces this: the page may only run
+its own code and those two pinned packages, and may only fetch from the
+pinned PDF.js package, so a document cannot be sent anywhere. Your
+settings are remembered in your browser's local storage.
 
 ## Browser support
 
@@ -103,7 +106,26 @@ npm run test:chromium    # unit tests + Chromium (desktop and mobile)
 ```
 
 Tests serve the CDN libraries from `node_modules`, so they run offline
-against the exact versions the app uses.
+against the exact versions the app uses. UI tests fail on any
+Content-Security-Policy violation.
+
+### Deployment
+
+The site is published to GitHub Pages by GitHub Actions
+(`.github/workflows/ci.yml`): every pull request runs the full test suite,
+and each push to `main` that passes it deploys an artifact containing only
+the files the site serves (`index.html`, `js/`, `LICENSE`). The
+repository's Pages source must be set to **GitHub Actions**
+(Settings → Pages → Build and deployment). Dependabot keeps the workflow's
+actions and Playwright up to date.
+
+### Updating pdf-lib or PDF.js
+
+The libraries are pinned in `package.json` (for tests), in the CDN URLs
+and SRI hashes in `index.html` and `js/engine.js`, and in the
+Content-Security-Policy in `index.html`. After changing the version in
+`package.json` and running `npm install`, `node tools/sri.mjs` prints the
+new URLs and hashes; a unit test fails until all of them match.
 
 ### Calibration
 

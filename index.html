@@ -8,6 +8,9 @@
   <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#101217" media="(prefers-color-scheme: dark)">
   <meta name="color-scheme" content="light dark">
+  <!-- Only the app itself and the two pinned libraries may run, and the page can
+       only fetch from the pinned PDF.js package: files cannot be sent anywhere. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/ https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/; worker-src 'self' blob:; connect-src https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/ blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src data: blob: https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/; base-uri 'none'; form-action 'none'; object-src 'none'">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2315803d'/%3E%3Cpath d='M10 8h8l5 5v11a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z' fill='%23fff'/%3E%3Cpath d='M12 18l4 4 4-4M16 13v9' stroke='%2315803d' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
   <style>
     :root {

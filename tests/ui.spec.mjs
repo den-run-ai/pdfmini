@@ -10,12 +10,17 @@ test.beforeEach(async ({ page }) => {
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') page.errors.push(m.text()); });
+  await page.addInitScript(() => {
+    window.cspViolations = [];
+    document.addEventListener('securitypolicyviolation', (e) => window.cspViolations.push(`${e.violatedDirective} ${e.blockedURI}`));
+  });
   await page.goto('/');
   await expect(page.locator('body')).toHaveAttribute('data-app', 'ready');
 });
 
 test.afterEach(async ({ page }) => {
   expect(page.errors).toEqual([]);
+  expect(await page.evaluate(() => window.cspViolations)).toEqual([]);
 });
 
 async function compressFile(page, file) {
@@ -181,4 +186,16 @@ test('changing settings clears a result made with the old settings', async ({ pa
   await page.click('#compress-btn');
   await expect(page.locator('body')).toHaveAttribute('data-compress', 'done');
   await expect(page.locator('#compress-dl')).toContainText(`${await page.evaluate(() => window.PDFMini.LEVELS.strong.dpi)} dpi`);
+});
+
+test('PDF.js features work under the page security policy', async ({ page }) => {
+  // CMYK images are decoded by PDF.js (module + worker + wasm from the CDN).
+  await compressFile(page, F.mixedImages);
+  await expect(page.locator('body')).toHaveAttribute('data-compress', 'done');
+  // "Convert pages to images" renders every page with PDF.js.
+  await page.click('#advanced summary');
+  await page.selectOption('#opt-mode', 'rasterize');
+  await compressFile(page, F.rotated);
+  await expect(page.locator('body')).toHaveAttribute('data-compress', 'done');
+  await expect(page.locator('#compress-dl')).toContainText('Pages converted to images');
 });

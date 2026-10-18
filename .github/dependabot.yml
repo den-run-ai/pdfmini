@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      # The app loads these from the CDN at pinned versions with SRI hashes,
+      # so they are updated together with js/engine.js and index.html.
+      - dependency-name: pdf-lib
+      - dependency-name: pdfjs-dist
