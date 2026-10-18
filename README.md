@@ -28,7 +28,7 @@ device and never uploaded.
 |---|---|---|---|
 | Light | 200 dpi | 82 | Printing, zooming in, archiving |
 | **Balanced** | 144 dpi | 72 | Email, sharing, reading on any screen |
-| Strong | 100 dpi | 55 | Upload limits, the smallest file that stays readable |
+| Strong | 110 dpi | 55 | Upload limits, the smallest file that stays readable |
 
 Images are only resampled when they are more than 15% sharper than the
 target for the size they are drawn at, and JPEGs that are already at or
@@ -109,8 +109,28 @@ The levels were calibrated on a corpus of real and synthetic documents
 (phone scans, photo albums, reports with photos and charts, slides,
 screenshots, CMYK print files, text-only papers, forms, a JPEG 2000/JBIG2
 book scan) by measuring output size and visual similarity (SSIM of pages
-rendered by poppler, an independent renderer) against Ghostscript's
-`/screen`, `/ebook` and `/printer` presets. To repeat it:
+rendered by poppler, an independent renderer, at 110 and 200 dpi), next to
+Ghostscript's presets, and by inspecting zoomed-in text and photo crops.
+
+Results on the eight image-heavy files (100 MB in total):
+
+| | Size of original | SSIM @110 dpi | SSIM @200 dpi |
+|---|---|---|---|
+| pdfmini Strong (110 dpi, q55) | 3.0% | 0.932 | 0.878 |
+| pdfmini Balanced (144 dpi, q72) | 6.0% | 0.941 | 0.913 |
+| pdfmini Light (200 dpi, q82) | 13.8% | 0.965 | 0.948 |
+| Ghostscript `/screen` | 5.7% | 0.869 | 0.855 |
+| Ghostscript `/ebook` | 19.8% | 0.883 | 0.918 |
+| Ghostscript `/printer` | 68.5% | 0.936 | 0.959 |
+
+Higher SSIM is closer to the original (1.0 is identical). Each level is
+about half the size of the one above it; going from 144 dpi/q72 to
+150 dpi/q75 added 16% in size for no visible difference, and below
+110 dpi small scanned text starts to blur. Text-only documents gain
+0-37% from the lossless steps alone (fonts are left untouched); files
+that are already tightly packed are returned unchanged.
+
+To repeat the measurements:
 
 ```sh
 node tools/run-engine.mjs --level balanced --out out/ my.pdf   # run the engine

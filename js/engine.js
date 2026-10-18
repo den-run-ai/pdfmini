@@ -20,11 +20,16 @@
 
   // ---------------------------------------------------------------- settings
 
-  /** Compression levels: target image resolution and JPEG quality. */
+  /**
+   * Compression levels: target image resolution and JPEG quality. Calibrated
+   * against SSIM of rendered pages on scans, photos, slides and screenshots
+   * (see README): each step roughly halves or doubles the image bytes, and
+   * Strong keeps 8-10 pt scanned text readable.
+   */
   const LEVELS = {
     light: { dpi: 200, quality: 82 },
     balanced: { dpi: 144, quality: 72 },
-    strong: { dpi: 100, quality: 55 },
+    strong: { dpi: 110, quality: 55 },
   };
 
   const PDFJS_VERSION = '6.4.299';
@@ -1150,11 +1155,13 @@
         const useJpeg = !flate || jpeg.length < flate.length * opts.losslessRatio;
         const best = useJpeg ? jpeg : flate;
         const limit = img.bytes * (img.lossless && useJpeg ? opts.losslessRatio : 0.92);
+        if (img.group) img.group.tried++;
         if (best.length >= limit) {
           stats.kept++;
           stats.imageBytesAfter += img.bytes;
           return;
         }
+        if (img.group) img.group.won++;
         replaceImage(doc, img, best, gray, useJpeg ? null : (gray ? 1 : 3));
         stats.recompressed++;
         stats.imageBytesAfter += best.length;
@@ -1199,16 +1206,41 @@
       await finish(img, rgba);
     }
 
-    for (let i = 0; i < viaPdfjs.length; i += 8) {
-      checkAbort(opts.signal);
-      try {
-        await renderImagesWithPdfjs(doc, viaPdfjs.slice(i, i + 8), finish, opts.signal);
-      } catch (e) {
-        if (e && e.name === 'AbortError') throw e;
-        stats.kept += viaPdfjs.length - i;
-        stats.rendererError = String((e && e.message) || e);
-        break;
+    // PDF.js decoding (JPEG 2000 especially) is slow, and scanned books often
+    // hold hundreds of near-identical images. Probe two of each kind first and
+    // skip the rest of a kind that does not get smaller.
+    const groups = new Map();
+    for (const img of viaPdfjs) {
+      const bpp = Math.round(Math.log2(img.bytes / (img.width * img.height)) * 2);
+      const key = `${img.filters.join('+')}|${img.cs.kind}|${img.width}x${img.height}|${bpp}|${img.tw}x${img.th}`;
+      if (!groups.has(key)) groups.set(key, { tried: 0, won: 0, items: [] });
+      img.group = groups.get(key);
+      img.group.items.push(img);
+    }
+    const probes = [], rest = [];
+    for (const g of groups.values()) { probes.push(...g.items.slice(0, 2)); rest.push(...g.items.slice(2)); }
+    // Keep going with a kind only while at least a quarter of its images shrink.
+    const promising = (g) => g.won > 0 && (g.tried < 4 || g.won / g.tried >= 0.25);
+    const runPdfjs = async (items) => {
+      let i = 0;
+      while (i < items.length) {
+        checkAbort(opts.signal);
+        const batch = [];
+        while (i < items.length && batch.length < 8) {
+          const img = items[i++];
+          if (img.group.tried < 2 || promising(img.group)) batch.push(img); else stats.kept++;
+        }
+        if (!batch.length) continue;
+        await renderImagesWithPdfjs(doc, batch, finish, opts.signal);
+        await Promise.all(inflight); // results feed the next batch's decision
       }
+    };
+    try {
+      await runPdfjs(probes);
+      await runPdfjs(rest);
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
+      stats.rendererError = String((e && e.message) || e);
     }
     await Promise.all(inflight);
     return stats;
