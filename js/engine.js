@@ -191,7 +191,9 @@
   }
 
   async function deflate(bytes) {
-    if (typeof CompressionStream === 'function') {
+    // Native streams are fastest for big inputs but carry a fixed async cost
+    // that dominates for the thousands of tiny streams some PDFs contain.
+    if (bytes.length > 64 * 1024 && typeof CompressionStream === 'function') {
       try { return await streamThrough(bytes, new CompressionStream('deflate')); } catch (e) { /* fall back */ }
     }
     return pakoDeflate(bytes);
@@ -254,9 +256,22 @@
     return n;
   }
 
+  /** Parse a PDF number token without allocating a string. */
+  function parseNumber(b, i, j) {
+    let sign = 1, v = 0, scale = 0, any = false;
+    if (b[i] === 0x2d) { sign = -1; i++; } else if (b[i] === 0x2b) i++;
+    for (; i < j; i++) {
+      const c = b[i];
+      if (c >= 0x30 && c <= 0x39) { v = v * 10 + (c - 0x30); if (scale) scale *= 10; any = true; } else if (c === 0x2e && !scale) scale = 1;
+      else return NaN;
+    }
+    return any ? sign * (scale ? v / scale : v) : NaN;
+  }
+
   /**
-   * Tokenize a content stream, calling onOp(operator, operands) for every
-   * operator. Operands are numbers, {name} objects, or null for anything else.
+   * Scan a content stream for the operators that place images: q, Q, cm and
+   * Do (inline image data is skipped). Calls onOp(op, operands), where
+   * operands are numbers, {s, e} name byte ranges, or null for anything else.
    * Returns false if the token budget ran out.
    */
   function tokenize(b, onOp, budget) {
@@ -271,7 +286,7 @@
       if (c === 0x2f) {
         let j = i + 1;
         while (j < n && !WS[b[j]] && !DELIM[b[j]]) j++;
-        ops.push({ name: ascii(b, i + 1, j) });
+        ops.push({ s: i + 1, e: j });
         i = j;
         continue;
       }
@@ -282,10 +297,13 @@
       let j = i;
       while (j < n && !WS[b[j]] && !DELIM[b[j]]) j++;
       if ((c >= 0x30 && c <= 0x39) || c === 0x2b || c === 0x2d || c === 0x2e) {
-        ops.push(parseFloat(ascii(b, i, j)));
+        ops.push(parseNumber(b, i, j));
       } else {
-        const op = ascii(b, i, j);
-        if (op === 'ID') { j = skipInlineImage(b, j); } else if (op !== 'BI') onOp(op, ops);
+        const len = j - i;
+        if (len === 1 && (c === 0x71 || c === 0x51)) onOp(c === 0x71 ? 'q' : 'Q', ops);
+        else if (len === 2 && c === 0x63 && b[i + 1] === 0x6d) onOp('cm', ops);
+        else if (len === 2 && c === 0x44 && b[i + 1] === 0x6f) onOp('Do', ops);
+        else if (len === 2 && c === 0x49 && b[i + 1] === 0x44) j = skipInlineImage(b, j); // ID
         ops.length = 0;
       }
       i = j;
@@ -356,8 +374,8 @@
           }
         } else if (op === 'Do') {
           const nameArg = args[args.length - 1];
-          if (!nameArg || !nameArg.name || !(xobjects instanceof L().PDFDict)) return;
-          const ref = xobjects.get(L().PDFName.of(nameArg.name));
+          if (!nameArg || nameArg.s === undefined || !(xobjects instanceof L().PDFDict)) return;
+          const ref = xobjects.get(L().PDFName.of(ascii(bytes, nameArg.s, nameArg.e)));
           const xo = lookup(ctx, ref);
           if (!(xo instanceof L().PDFRawStream)) return;
           const subtype = dictGet(ctx, xo.dict, 'Subtype');
@@ -1436,7 +1454,7 @@
     const PDFLib = L();
     if (!PDFLib) throw new PDFMiniError('lib', 'PDF library failed to load. Check your connection and reload.');
     try {
-      return await PDFLib.PDFDocument.load(bytes, { updateMetadata: false, parseSpeed: 1500, throwOnInvalidObject: false });
+      return await PDFLib.PDFDocument.load(bytes, { updateMetadata: false, parseSpeed: 5000, throwOnInvalidObject: false });
     } catch (e) {
       if (e instanceof PDFLib.EncryptedPDFError || /encrypt/i.test(e && e.message)) {
         throw new PDFMiniError('encrypted', 'This PDF is password-protected or encrypted.');
@@ -1455,6 +1473,17 @@
     // PDF/A-1 is based on PDF 1.4, which has no object streams.
     if (opts && opts.noObjectStreams) return PDFLib.PDFWriter.forContext(doc.context, 2000).serializeToBuffer();
     return PDFLib.PDFStreamWriter.forContext(doc.context, 2000, true, 400).serializeToBuffer();
+  }
+
+  /** True if the file stores objects in compressed object streams. */
+  function hasObjectStreams(bytes) {
+    const pat = [0x2f, 0x4f, 0x62, 0x6a, 0x53, 0x74, 0x6d]; // "/ObjStm"
+    outer: for (let i = 0, n = bytes.length - pat.length; i <= n; i++) {
+      if (bytes[i] !== 0x2f) continue;
+      for (let k = 1; k < pat.length; k++) if (bytes[i + k] !== pat[k]) continue outer;
+      return true;
+    }
+    return false;
   }
 
   /** PDF/A part declared in the document's XMP metadata, or 0. */
@@ -1546,7 +1575,7 @@
     } catch (e) {
       if (e && e.name === 'AbortError') throw e;
       // Replacements are atomic, so the document is still valid: keep going losslessly.
-      imageStats = { imageError: String((e && e.message) || e) };
+      imageStats = { imageError: String((e && e.message) || e), recompressed: -1 }; // unknown: save anyway
     }
     checkAbort(settings.signal);
     progress(0.86, 'Optimizing structure');
@@ -1558,12 +1587,16 @@
     const duplicates = dedupeStreams(doc);
     const unreachable = removeUnreachable(doc);
     const plainSaved = await compressPlainStreams(doc);
+    const stats = Object.assign(imageStats, { pages: doc.getPageCount(), privateRemoved, duplicates, unreachable, plainSaved, pdfa, signed });
+    const changed = imageStats.recompressed || privateRemoved || duplicates || unreachable || plainSaved || settings.stripMetadata;
+    // Re-writing an untouched file that already uses object streams cannot win.
+    if (!changed && hasObjectStreams(bytes)) return { bytes, stats };
     bumpVersion(doc);
     checkAbort(settings.signal);
     progress(0.92, 'Saving');
     await nextFrame();
     const out = await serialize(doc, { noObjectStreams: pdfa === 1 });
-    return { bytes: out, stats: Object.assign(imageStats, { pages: doc.getPageCount(), privateRemoved, duplicates, unreachable, plainSaved, pdfa, signed }) };
+    return { bytes: out, stats };
   }
 
   async function rasterize(bytes, settings, progress, password) {

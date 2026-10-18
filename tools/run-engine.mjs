@@ -1,7 +1,9 @@
 // Run the pdfmini engine on local PDFs in headless Chromium.
 //
 //   node tools/run-engine.mjs [--level balanced] [--mode images|rasterize]
-//        [--dpi N] [--quality N] [--gray] [--out DIR] [--json] file.pdf ...
+//        [--dpi N] [--quality N] [--gray] [--cpu-throttle N] [--out DIR] [--json] file.pdf ...
+//
+// --cpu-throttle 4 slows the page's CPU about 4x (a rough mid-range phone).
 //
 // Writes <out>/<name>.pdf for each input and prints size/time stats.
 import fs from 'node:fs';
@@ -24,6 +26,7 @@ function parseArgs(argv) {
     else if (a === '--gray') opts.grayscale = true;
     else if (a === '--out') opts.out = argv[++i];
     else if (a === '--json') opts.json = true;
+    else if (a === '--cpu-throttle') opts.cpuThrottle = Number(argv[++i]);
     else opts.files.push(a);
   }
   return opts;
@@ -60,7 +63,7 @@ function startServer(inputs, outDir) {
   });
 }
 
-export async function runEngine(files, options, outDir) {
+export async function runEngine(files, options, outDir, cpuThrottle) {
   const inputs = new Map(files.map((f) => [path.basename(f), path.resolve(f)]));
   if (outDir) fs.mkdirSync(outDir, { recursive: true });
   const server = await startServer(inputs, outDir);
@@ -71,6 +74,10 @@ export async function runEngine(files, options, outDir) {
   const page = await context.newPage();
   page.on('pageerror', (e) => console.error('pageerror:', e.message));
   await page.goto(`${base}/tests/harness.html`);
+  if (cpuThrottle > 1) {
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuThrottle });
+  }
   const results = [];
   try {
     for (const name of inputs.keys()) {
@@ -97,8 +104,8 @@ export async function runEngine(files, options, outDir) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const opts = parseArgs(process.argv.slice(2));
-  const { files, out, json, ...options } = opts;
-  const results = await runEngine(files, options, out);
+  const { files, out, json, cpuThrottle, ...options } = opts;
+  const results = await runEngine(files, options, out, cpuThrottle);
   if (json) console.log(JSON.stringify(results, null, 2));
   else {
     for (const r of results) {
