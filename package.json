@@ -1,0 +1,18 @@
+{
+  "name": "pdfmini",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Compress and combine PDFs entirely in the browser.",
+  "license": "MIT",
+  "scripts": {
+    "serve": "node tools/serve.mjs",
+    "test": "playwright test",
+    "test:chromium": "playwright test --project=chromium --project=mobile-chrome",
+    "calibrate": "node tools/calibrate.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.4.299"
+  }
+}

@@ -1,853 +1,343 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>PDF Tools - Compress & Combine</title>
-
-  <!-- PDF-Lib -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-
-  <!-- PDF.js for rasterizing pages -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-  <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-  </script>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>pdfmini – Compress &amp; combine PDFs privately</title>
+  <meta name="description" content="Compress and combine PDF files right in your browser. Free, fast, and private: your files are never uploaded.">
+  <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101217" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2315803d'/%3E%3Cpath d='M10 8h8l5 5v11a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z' fill='%23fff'/%3E%3Cpath d='M12 18l4 4 4-4M16 13v9' stroke='%2315803d' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
   <style>
+    :root {
+      --bg: #f5f6f8;
+      --surface: #ffffff;
+      --surface-2: #f2f4f6;
+      --tab-active: #ffffff;
+      --text: #14171c;
+      --muted: #5c6470;
+      --border: #dfe3e8;
+      --accent: #15803d;
+      --accent-hover: #166534;
+      --accent-text: #15803d;
+      --accent-soft: #e8f5ec;
+      --danger: #b42318;
+      --danger-soft: #fdeceb;
+      --focus: #2563eb;
+      --radius: 14px;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 8px 24px rgba(16, 24, 40, .06);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101217;
+        --surface: #181b22;
+        --surface-2: #20242d;
+        --tab-active: #343a46;
+        --text: #e8eaee;
+        --muted: #a1a8b3;
+        --border: #2d323d;
+        --accent: #15803d;
+        --accent-hover: #1a9248;
+        --accent-text: #4ade80;
+        --accent-soft: #15291d;
+        --danger: #f97066;
+        --danger-soft: #3a1d1b;
+        --focus: #60a5fa;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #f5f5f5;
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     }
-    .container {
-      background-color: white;
-      border-radius: 8px;
-      padding: 20px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    .wrap { max-width: 560px; margin: 0 auto; }
+    header { text-align: center; margin: 8px 0 20px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; margin: 0; font-size: 26px; letter-spacing: -.02em; }
+    .brand svg { width: 34px; height: 34px; }
+    .tagline { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; }
+    @media (min-width: 600px) { .card { padding: 24px; } }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; padding: 4px; background: var(--surface-2); border-radius: 11px; margin-bottom: 18px; }
+    .tab {
+      flex: 1; min-height: 42px; border: 0; border-radius: 8px; background: transparent; color: var(--muted);
+      font: inherit; font-weight: 600; cursor: pointer;
     }
-    h1 {
-      text-align: center;
-      color: #333;
-      margin-bottom: 20px;
-      font-size: 24px;
+    .tab[aria-selected="true"] { background: var(--tab-active); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+    [hidden] { display: none !important; }
+
+    /* Drop zone */
+    .drop {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+      min-height: 150px; padding: 20px; border: 2px dashed var(--border); border-radius: 12px;
+      text-align: center; cursor: pointer; transition: border-color .15s, background-color .15s;
     }
-    /* Mode tabs */
-    .mode-tabs {
-      display: flex;
-      margin-bottom: 20px;
-      border-bottom: 2px solid #eee;
+    .drop:hover, .drop.dragging { border-color: var(--accent); background: var(--accent-soft); }
+    .drop svg { width: 40px; height: 40px; color: var(--accent-text); }
+    .drop-title { font-weight: 650; font-size: 17px; }
+    .drop-hint { color: var(--muted); font-size: 14px; }
+    @media (hover: none) { .drop-hint.desktop { display: none; } }
+    .visually-hidden { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+    /* Selected file */
+    .file-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+    .file-card svg { flex: none; width: 30px; height: 30px; color: var(--accent-text); }
+    .file-text { min-width: 0; flex: 1; }
+    .file-name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-meta { display: block; color: var(--muted); font-size: 14px; }
+
+    /* Levels */
+    fieldset { border: 0; padding: 0; margin: 18px 0 0; min-width: 0; }
+    legend { font-weight: 650; margin-bottom: 8px; padding: 0; }
+    .levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .level { position: relative; display: block; }
+    .level input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+    .level span {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 64px; padding: 8px 4px;
+      border: 1.5px solid var(--border); border-radius: 10px; text-align: center; cursor: pointer; transition: border-color .15s, background-color .15s;
     }
-    .mode-tab {
-      flex: 1;
-      padding: 12px;
-      text-align: center;
-      cursor: pointer;
-      border: none;
-      background: none;
-      font-size: 16px;
-      font-weight: bold;
-      color: #666;
-      transition: all 0.3s;
-      border-bottom: 3px solid transparent;
-      margin-bottom: -2px;
+    .level b { font-size: 15px; }
+    .level small { color: var(--muted); font-size: 12.5px; line-height: 1.3; }
+    .level input:checked + span { border-color: var(--accent); background: var(--accent-soft); }
+    .level input:checked + span small { color: var(--text); }
+    .level input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    /* Advanced settings */
+    details.advanced { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; }
+    details.advanced > summary {
+      display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; cursor: pointer; list-style: none;
+      color: var(--muted); font-size: 15px; font-weight: 600;
     }
-    .mode-tab:hover { color: #333; }
-    .mode-tab.active {
-      color: #4CAF50;
-      border-bottom-color: #4CAF50;
+    details.advanced > summary::-webkit-details-marker { display: none; }
+    .chev { width: 18px; height: 18px; flex: none; transition: transform .15s; }
+    details[open] > summary .chev { transform: rotate(90deg); }
+    .badge { margin-left: auto; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-text); }
+    .adv-body { display: grid; gap: 14px; padding: 4px 14px 14px; }
+    .field label, .field .label { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .field output, .hint { color: var(--muted); font-weight: 400; }
+    .hint { font-size: 13px; margin: 6px 0 0; }
+    select {
+      width: 100%; min-height: 44px; padding: 8px 12px; font: inherit; font-size: 16px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
     }
-    .mode-content { display: none; }
-    .mode-content.active { display: block; }
-    .upload-area {
-      border: 2px dashed #ccc;
-      border-radius: 6px;
-      padding: 30px;
-      text-align: center;
-      margin-bottom: 20px;
-      cursor: pointer;
-      transition: background-color 0.3s;
+    input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; min-height: 28px; }
+    .check { display: flex; align-items: flex-start; gap: 10px; font-size: 15px; cursor: pointer; }
+    .check input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); flex: none; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 20px;
+      border-radius: 10px; border: 1px solid transparent; font: inherit; font-weight: 650; text-decoration: none; cursor: pointer;
+      transition: background-color .15s, border-color .15s;
     }
-    .upload-area:hover { background-color: #f9f9f9; }
-    .upload-area.active {
-      border-color: #4CAF50;
-      background-color: rgba(76,175,80,0.1);
+    .btn svg { width: 20px; height: 20px; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+    .btn-secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+    .btn-secondary:hover { border-color: var(--muted); }
+    .btn-block { width: 100%; margin-top: 18px; }
+    .btn-link { background: none; border: 0; padding: 6px 4px; color: var(--accent-text); font: inherit; font-weight: 600; cursor: pointer; border-radius: 6px; }
+    .icon-btn {
+      display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none;
+      border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer;
     }
-    #file-input, #combine-file-input { display: none; }
-    .settings { margin-bottom: 20px; }
-    label { display: block; margin-bottom: 8px; font-weight: bold; }
-    select, input {
-      width: 100%; padding: 8px; margin-bottom: 15px;
-      border: 1px solid #ddd; border-radius: 4px;
-      box-sizing: border-box;
-    }
-    button {
-      background-color: #4CAF50; color: white; border: none;
-      padding: 10px 15px; border-radius: 4px;
-      cursor: pointer; width: 100%; font-size: 16px;
-      transition: background-color 0.3s;
-    }
-    button:hover { background-color: #45a049; }
-    button:disabled {
-      background-color: #ccc; cursor: not-allowed;
-    }
-    .status { margin-top: 20px; text-align: center; }
-    progress { width: 100%; margin-top: 10px; display: none; }
-    .download-link {
-      display: block; margin-top: 20px; text-align: center;
-      color: #4CAF50; text-decoration: none; font-weight: bold;
-    }
-    .download-link:hover { text-decoration: underline; }
-    .file-info {
-      margin-top: 15px; background-color: #f5f5f5;
-      padding: 10px; border-radius: 4px; display: none;
-    }
-    .error { color: #f44336; margin-top: 10px; font-weight: bold; }
-    #log-area {
-      font-family: monospace;
-      white-space: pre-wrap;
-      max-height: 200px;
-      overflow-y: auto;
-      background: #eee;
-      padding: 10px;
-      border-radius: 4px;
-      margin-top: 15px;
-    }
-    /* File list for combine mode */
-    .file-list {
-      margin-bottom: 20px;
-    }
-    .file-list-item {
-      display: flex;
-      align-items: center;
-      padding: 10px;
-      background: #f9f9f9;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      margin-bottom: 8px;
-      cursor: grab;
-      transition: all 0.2s;
-    }
-    .file-list-item:hover { background: #f0f0f0; }
-    .file-list-item.dragging {
-      opacity: 0.5;
-      background: #e0e0e0;
-    }
-    .file-list-item.drag-over {
-      border-color: #4CAF50;
-      border-style: dashed;
-    }
-    .file-list-item .drag-handle {
-      margin-right: 10px;
-      color: #999;
-      cursor: grab;
-    }
-    .file-list-item .file-details {
-      flex: 1;
-    }
-    .file-list-item .file-name {
-      font-weight: bold;
-      font-size: 14px;
-    }
-    .file-list-item .file-size {
-      font-size: 12px;
-      color: #666;
-    }
-    .file-list-item .file-pages {
-      font-size: 12px;
-      color: #4CAF50;
-    }
-    .file-list-item .remove-btn {
-      background: #f44336;
-      color: white;
-      border: none;
-      padding: 5px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      width: auto;
-    }
-    .file-list-item .remove-btn:hover { background: #d32f2f; }
-    .add-more-btn {
-      background: #2196F3;
-      margin-bottom: 15px;
-    }
-    .add-more-btn:hover { background: #1976D2; }
-    .total-info {
-      text-align: center;
-      padding: 10px;
-      background: #e8f5e9;
-      border-radius: 4px;
-      margin-bottom: 15px;
-    }
-    /* Test section */
-    .test-section {
-      margin-top: 30px;
-      padding-top: 20px;
-      border-top: 2px dashed #ddd;
-    }
-    .test-section h3 {
-      color: #666;
-      margin-bottom: 15px;
-    }
-    .test-btn {
-      background: #9C27B0;
-      margin-bottom: 10px;
-    }
-    .test-btn:hover { background: #7B1FA2; }
-    .test-results {
-      font-family: monospace;
-      font-size: 12px;
-      background: #263238;
-      color: #aed581;
-      padding: 15px;
-      border-radius: 4px;
-      max-height: 200px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
-    .test-pass { color: #4CAF50; }
-    .test-fail { color: #f44336; }
+    .icon-btn:hover:not(:disabled) { background: var(--surface); color: var(--text); }
+    .icon-btn:disabled { opacity: .35; cursor: default; }
+    .icon-btn svg { width: 20px; height: 20px; }
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    /* Progress */
+    .progress { margin-top: 18px; }
+    .progress-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+    .bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+    .bar > div { height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .2s ease-out; }
+
+    /* Results and errors */
+    .result { margin-top: 18px; padding: 16px; border-radius: 12px; background: var(--accent-soft); }
+    .result.neutral { background: var(--surface-2); }
+    .result h2 { margin: 0; font-size: 20px; }
+    .result p { margin: 4px 0 0; color: var(--muted); }
+    .sizes { font-variant-numeric: tabular-nums; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .actions .btn { flex: 1 1 140px; }
+    .result .note { margin-top: 10px; font-size: 14px; color: var(--text); }
+    .alert { margin-top: 18px; padding: 12px 14px; border-radius: 10px; background: var(--danger-soft); color: var(--danger); font-weight: 500; }
+    .details { margin-top: 12px; font-size: 13.5px; color: var(--muted); }
+    .details summary { cursor: pointer; }
+    .details dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; }
+    .details dt { font-weight: 600; }
+    .details dd { margin: 0; }
+
+    /* Combine list */
+    .file-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+    .file-item { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+    .file-item[draggable="true"] { cursor: grab; }
+    .file-item.drag-source { opacity: .45; }
+    .file-item.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+    .file-item.drop-after { box-shadow: 0 3px 0 var(--accent); }
+    .file-item .num { flex: none; width: 22px; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+    .file-item .file-text { padding: 4px 0; }
+    .summary { margin-top: 12px; color: var(--muted); font-size: 14px; text-align: center; }
+    .row { display: flex; gap: 10px; margin-top: 14px; }
+    .row .btn { flex: 1; }
+
+    footer { margin: 22px 0 0; text-align: center; color: var(--muted); font-size: 13.5px; }
+    footer a { color: inherit; }
+    .privacy { display: inline-flex; align-items: center; gap: 6px; }
+    .privacy svg { width: 16px; height: 16px; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
   </style>
+  <script defer src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" integrity="sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI" crossorigin="anonymous"></script>
+  <script defer src="js/jpeg.js"></script>
+  <script defer src="js/engine.js"></script>
+  <script defer src="js/app.js"></script>
 </head>
 <body>
-  <div class="container">
-    <h1>PDF Tools</h1>
+  <div class="wrap">
+    <header>
+      <h1 class="brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#15803d"/><path d="M10 8h8l5 5v11a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z" fill="#fff"/><path d="M12 18l4 4 4-4M16 13v9" stroke="#15803d" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+        pdfmini
+      </h1>
+      <p class="tagline">Compress and combine PDFs, right in your browser.</p>
+    </header>
 
-    <!-- Mode Tabs -->
-    <div class="mode-tabs">
-      <button class="mode-tab active" data-mode="compress">Compress</button>
-      <button class="mode-tab" data-mode="combine">Combine</button>
-    </div>
-
-    <!-- Compress Mode -->
-    <div id="compress-mode" class="mode-content active">
-      <div id="upload-area" class="upload-area">
-        <p>Drop your PDF here or click to browse</p>
-        <input type="file" id="file-input" accept=".pdf" />
+    <main class="card">
+      <div class="tabs" role="tablist" aria-label="Tool">
+        <button class="tab" role="tab" id="tab-compress" aria-controls="panel-compress" aria-selected="true">Compress</button>
+        <button class="tab" role="tab" id="tab-combine" aria-controls="panel-combine" aria-selected="false" tabindex="-1">Combine</button>
       </div>
 
-      <div class="file-info" id="file-info">
-        <p>File: <span id="file-name"></span></p>
-        <p>Original size: <span id="original-size"></span></p>
-      </div>
+      <!-- Compress -->
+      <section id="panel-compress" role="tabpanel" aria-labelledby="tab-compress">
+        <label class="drop" id="compress-drop" for="compress-input">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2"/></svg>
+          <span class="drop-title">Choose a PDF</span>
+          <span class="drop-hint desktop">or drop it here</span>
+        </label>
+        <input type="file" id="compress-input" class="visually-hidden" accept="application/pdf,.pdf">
 
-      <div class="settings">
-        <label for="compression-level">Compression Level</label>
-        <select id="compression-level">
-          <option value="low">Low – ~80% Size</option>
-          <option value="medium" selected>Medium – ~50% Size</option>
-          <option value="high">High – ~20% Size</option>
-        </select>
-      </div>
-
-      <button id="compress-btn" disabled>Compress PDF</button>
-    </div>
-
-    <!-- Combine Mode -->
-    <div id="combine-mode" class="mode-content">
-      <div id="combine-upload-area" class="upload-area">
-        <p>Drop PDFs here or click to browse (select multiple)</p>
-        <input type="file" id="combine-file-input" accept=".pdf" multiple />
-      </div>
-
-      <div id="combine-file-list" class="file-list"></div>
-      
-      <div id="combine-total-info" class="total-info" style="display: none;">
-        <strong>Total:</strong> <span id="total-files">0</span> files, 
-        <span id="total-pages">0</span> pages, 
-        <span id="total-size">0 KB</span>
-      </div>
-
-      <button id="add-more-btn" class="add-more-btn" style="display: none;">Add More PDFs</button>
-      <button id="combine-btn" disabled>Combine PDFs</button>
-    </div>
-
-    <div class="status" id="status">
-      <p id="status-text"></p>
-      <progress id="progress-bar" value="0" max="100"></progress>
-    </div>
-
-    <!-- Log area for iteration details -->
-    <div id="log-area"></div>
-
-    <a href="#" id="download-link" class="download-link" style="display:none;">
-      Download PDF
-    </a>
-
-    <!-- Test Section -->
-    <div class="test-section">
-      <h3>Developer Tests</h3>
-      <button id="run-tests-btn" class="test-btn">Run Tests</button>
-      <div id="test-results" class="test-results" style="display: none;"></div>
-    </div>
-  </div>
-
-  <script>
-    const { PDFDocument } = PDFLib;
-    
-    // Compress mode elements
-    const uploadArea     = document.getElementById('upload-area');
-    const fileInput      = document.getElementById('file-input');
-    const compressBtn    = document.getElementById('compress-btn');
-    const fileInfo       = document.getElementById('file-info');
-    const fileName       = document.getElementById('file-name');
-    const originalSize   = document.getElementById('original-size');
-    const compressionSel = document.getElementById('compression-level');
-    
-    // Combine mode elements
-    const combineUploadArea = document.getElementById('combine-upload-area');
-    const combineFileInput  = document.getElementById('combine-file-input');
-    const combineBtn        = document.getElementById('combine-btn');
-    const combineFileList   = document.getElementById('combine-file-list');
-    const combineTotalInfo  = document.getElementById('combine-total-info');
-    const addMoreBtn        = document.getElementById('add-more-btn');
-    const totalFilesEl      = document.getElementById('total-files');
-    const totalPagesEl      = document.getElementById('total-pages');
-    const totalSizeEl       = document.getElementById('total-size');
-    
-    // Shared elements
-    const statusText     = document.getElementById('status-text');
-    const progressBar    = document.getElementById('progress-bar');
-    const downloadLink   = document.getElementById('download-link');
-    const logArea        = document.getElementById('log-area');
-    const modeTabs       = document.querySelectorAll('.mode-tab');
-    const testResultsEl  = document.getElementById('test-results');
-    const runTestsBtn    = document.getElementById('run-tests-btn');
-
-    let selectedFile = null;
-    let lastObjectURL = null;
-    let currentMode = 'compress';
-    
-    // Combine mode state
-    let combineFiles = []; // Array of { file: File, pageCount: number }
-
-    // ==================== MODE SWITCHING ====================
-    modeTabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        const mode = tab.dataset.mode;
-        if (mode === currentMode) return;
-        
-        currentMode = mode;
-        modeTabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        
-        document.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
-        document.getElementById(`${mode}-mode`).classList.add('active');
-        
-        // Reset status
-        statusText.textContent = '';
-        progressBar.style.display = 'none';
-        downloadLink.style.display = 'none';
-        logArea.textContent = '';
-      });
-    });
-
-    // ==================== COMPRESS MODE ====================
-    uploadArea.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', handleFileSelect);
-    uploadArea.addEventListener('dragover', e => {
-      e.preventDefault();
-      uploadArea.classList.add('active');
-    });
-    uploadArea.addEventListener('dragleave', e => {
-      e.preventDefault();
-      uploadArea.classList.remove('active');
-    });
-    uploadArea.addEventListener('drop', handleDrop);
-    compressBtn.addEventListener('click', compressPDF);
-
-    function handleFileSelect(e) {
-      const f = e.target.files[0];
-      if (!f || f.type !== 'application/pdf') return showError('Please select a PDF file');
-      processSelectedFile(f);
-    }
-    function handleDrop(e) {
-      e.preventDefault();
-      uploadArea.classList.remove('active');
-      const f = e.dataTransfer.files[0];
-      if (!f || f.type !== 'application/pdf') return showError('Please drop a PDF file');
-      processSelectedFile(f);
-    }
-    function processSelectedFile(file) {
-      selectedFile = file;
-      compressBtn.disabled = false;
-      fileName.textContent = file.name;
-      originalSize.textContent = formatFileSize(file.size);
-      fileInfo.style.display = 'block';
-      statusText.textContent = '';
-      downloadLink.style.display = 'none';
-      logArea.textContent = '';
-      uploadArea.querySelector('p').textContent =
-        'PDF selected! Drop another or click to change';
-    }
-
-    async function compressPDF() {
-      if (!selectedFile) return;
-      try {
-        _setStatus('Initializing…', 5);
-        compressBtn.disabled = true;
-        logArea.textContent = '';
-
-        const data = await selectedFile.arrayBuffer();
-        _setStatus('Loading PDF…', 15);
-        const pdfJS = await pdfjsLib.getDocument({ data }).promise;
-
-        const fileSize = selectedFile.size;
-        const targetRatio = getTargetRatio();
-        _log(`Target size ratio: ${(targetRatio*100).toFixed(0)}%`);
-
-        _setStatus('Compressing…', 20);
-        const blob = await iterativeCompress(pdfJS, fileSize, targetRatio);
-
-        _setStatus('Finalizing…', 90);
-        _setStatus('Done!', 100);
-
-        if (lastObjectURL) URL.revokeObjectURL(lastObjectURL);
-        lastObjectURL = URL.createObjectURL(blob);
-
-        downloadLink.href = lastObjectURL;
-        downloadLink.download = getCompressedFileName(selectedFile.name);
-        downloadLink.style.display = 'block';
-        downloadLink.textContent = 'Download Compressed PDF';
-
-        const savings = ((fileSize - blob.size)/fileSize*100).toFixed(1);
-        statusText.textContent =
-          `Reduced by ${savings}% — ${formatFileSize(fileSize)} → ${formatFileSize(blob.size)}`;
-
-      } catch (err) {
-        console.error(err);
-        showError('Compression failed. Please try another file.');
-      } finally {
-        compressBtn.disabled = false;
-      }
-    }
-
-    async function iterativeCompress(pdfJS, fileSize, targetRatio) {
-      let quality = targetRatio;
-      let blob = null;
-      const maxIter = 5;
-
-      for (let i = 1; i <= maxIter; i++) {
-        _log(`\nIteration ${i}: trying quality=${quality.toFixed(2)}`);
-        blob = await compressPages(pdfJS, quality);
-        const ratio = blob.size / fileSize;
-        _log(`→ size=${formatFileSize(blob.size)} (${(ratio*100).toFixed(1)}%)`);
-
-        // stop if within ±5% of target
-        if (Math.abs(ratio - targetRatio) < 0.05) {
-          _log(`Within tolerance (±5%).`);
-          break;
-        }
-        // adjust quality estimate
-        quality = quality * (targetRatio / ratio);
-        quality = Math.min(1, Math.max(0.1, quality));
-      }
-      return blob;
-    }
-
-    async function compressPages(pdfJS, quality) {
-      const pageCount = pdfJS.numPages;
-      const outPdf = await PDFDocument.create();
-
-      for (let i = 1; i <= pageCount; i++) {
-        const page = await pdfJS.getPage(i);
-        const vp = page.getViewport({ scale: 1.0 });
-        const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d');
-
-        _setStatus(`Rendering ${i}/${pageCount}…`, 20 + (i-1)*(50/pageCount));
-        await page.render({ canvasContext: ctx, viewport: vp }).promise;
-
-        _setStatus(`Encoding ${i}/${pageCount} at q=${quality.toFixed(2)}…`, 25 + (i-1)*(50/pageCount));
-        const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
-        const jpgBytes   = await fetch(jpegDataUrl).then(r => r.arrayBuffer());
-        const jpg        = await outPdf.embedJpg(jpgBytes);
-
-        const { width, height } = jpg.scale(1);
-        const newPage = outPdf.addPage([width, height]);
-        newPage.drawImage(jpg, { x: 0, y: 0, width, height });
-      }
-
-      _setStatus('Merging pages…', 80);
-      const outBytes = await outPdf.save({ useObjectStreams: true });
-      return new Blob([outBytes], { type: 'application/pdf' });
-    }
-
-    // ==================== COMBINE MODE ====================
-    combineUploadArea.addEventListener('click', () => combineFileInput.click());
-    combineFileInput.addEventListener('change', handleCombineFileSelect);
-    combineUploadArea.addEventListener('dragover', e => {
-      e.preventDefault();
-      combineUploadArea.classList.add('active');
-    });
-    combineUploadArea.addEventListener('dragleave', e => {
-      e.preventDefault();
-      combineUploadArea.classList.remove('active');
-    });
-    combineUploadArea.addEventListener('drop', handleCombineDrop);
-    addMoreBtn.addEventListener('click', () => combineFileInput.click());
-    combineBtn.addEventListener('click', combinePDFs);
-
-    async function handleCombineFileSelect(e) {
-      const files = Array.from(e.target.files);
-      await addFilesToCombine(files);
-      combineFileInput.value = ''; // Reset to allow re-selecting same files
-    }
-    
-    async function handleCombineDrop(e) {
-      e.preventDefault();
-      combineUploadArea.classList.remove('active');
-      const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
-      if (files.length === 0) return showError('Please drop PDF files');
-      await addFilesToCombine(files);
-    }
-
-    async function addFilesToCombine(files) {
-      for (const file of files) {
-        if (file.type !== 'application/pdf') {
-          _log(`Skipping non-PDF: ${file.name}`);
-          continue;
-        }
-        // Get page count
-        try {
-          const data = await file.arrayBuffer();
-          const pdf = await PDFDocument.load(data);
-          const pageCount = pdf.getPageCount();
-          combineFiles.push({ file, pageCount });
-        } catch (err) {
-          _log(`Error loading ${file.name}: ${err.message}`);
-        }
-      }
-      renderCombineFileList();
-      updateCombineUI();
-    }
-
-    function renderCombineFileList() {
-      combineFileList.innerHTML = '';
-      combineFiles.forEach((item, index) => {
-        const el = document.createElement('div');
-        el.className = 'file-list-item';
-        el.draggable = true;
-        el.dataset.index = index;
-        el.innerHTML = `
-          <span class="drag-handle">☰</span>
-          <div class="file-details">
-            <div class="file-name">${item.file.name}</div>
-            <div class="file-size">${formatFileSize(item.file.size)}</div>
-            <div class="file-pages">${item.pageCount} page${item.pageCount !== 1 ? 's' : ''}</div>
+        <div class="file-card" id="compress-file" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+          <div class="file-text">
+            <span class="file-name" id="compress-name"></span>
+            <span class="file-meta" id="compress-meta"></span>
           </div>
-          <button class="remove-btn" data-index="${index}">Remove</button>
-        `;
-        
-        // Drag events
-        el.addEventListener('dragstart', handleDragStart);
-        el.addEventListener('dragover', handleDragOver);
-        el.addEventListener('drop', handleItemDrop);
-        el.addEventListener('dragend', handleDragEnd);
-        
-        // Remove button
-        el.querySelector('.remove-btn').addEventListener('click', (e) => {
-          e.stopPropagation();
-          combineFiles.splice(index, 1);
-          renderCombineFileList();
-          updateCombineUI();
-        });
-        
-        combineFileList.appendChild(el);
-      });
-    }
+          <button type="button" class="btn-link" id="compress-change">Change</button>
+        </div>
 
-    let draggedIndex = null;
-    
-    function handleDragStart(e) {
-      draggedIndex = parseInt(e.target.dataset.index);
-      e.target.classList.add('dragging');
-    }
-    
-    function handleDragOver(e) {
-      e.preventDefault();
-      const item = e.target.closest('.file-list-item');
-      if (item) item.classList.add('drag-over');
-    }
-    
-    function handleItemDrop(e) {
-      e.preventDefault();
-      const item = e.target.closest('.file-list-item');
-      if (!item) return;
-      
-      const dropIndex = parseInt(item.dataset.index);
-      if (draggedIndex !== null && draggedIndex !== dropIndex) {
-        // Reorder array
-        const [moved] = combineFiles.splice(draggedIndex, 1);
-        combineFiles.splice(dropIndex, 0, moved);
-        renderCombineFileList();
-      }
-      item.classList.remove('drag-over');
-    }
-    
-    function handleDragEnd(e) {
-      document.querySelectorAll('.file-list-item').forEach(el => {
-        el.classList.remove('dragging', 'drag-over');
-      });
-      draggedIndex = null;
-    }
+        <fieldset>
+          <legend>Compression</legend>
+          <div class="levels">
+            <label class="level"><input type="radio" name="level" value="light"><span><b>Light</b><small>Best quality</small></span></label>
+            <label class="level"><input type="radio" name="level" value="balanced" checked><span><b>Balanced</b><small>Recommended</small></span></label>
+            <label class="level"><input type="radio" name="level" value="strong"><span><b>Strong</b><small>Smallest file</small></span></label>
+          </div>
+        </fieldset>
 
-    function updateCombineUI() {
-      const hasFiles = combineFiles.length > 0;
-      const canCombine = combineFiles.length >= 2;
-      
-      combineBtn.disabled = !canCombine;
-      addMoreBtn.style.display = hasFiles ? 'block' : 'none';
-      combineTotalInfo.style.display = hasFiles ? 'block' : 'none';
-      
-      if (hasFiles) {
-        const totalPages = combineFiles.reduce((sum, item) => sum + item.pageCount, 0);
-        const totalSize = combineFiles.reduce((sum, item) => sum + item.file.size, 0);
-        totalFilesEl.textContent = combineFiles.length;
-        totalPagesEl.textContent = totalPages;
-        totalSizeEl.textContent = formatFileSize(totalSize);
-        
-        combineUploadArea.querySelector('p').textContent = 
-          `${combineFiles.length} PDF${combineFiles.length !== 1 ? 's' : ''} selected. Drop more or click "Add More"`;
-      } else {
-        combineUploadArea.querySelector('p').textContent = 
-          'Drop PDFs here or click to browse (select multiple)';
-      }
-      
-      statusText.textContent = '';
-      downloadLink.style.display = 'none';
-    }
+        <details class="advanced" id="advanced">
+          <summary><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>Advanced settings <span class="badge" id="custom-badge" hidden>Custom</span></summary>
+          <div class="adv-body">
+            <div class="field">
+              <label for="opt-mode">Method</label>
+              <select id="opt-mode">
+                <option value="images">Keep text, compress images</option>
+                <option value="rasterize">Convert pages to images</option>
+              </select>
+              <p class="hint" id="mode-hint">Text stays sharp and searchable. Best for most documents.</p>
+            </div>
+            <div class="field">
+              <label for="opt-dpi">Image resolution <output id="opt-dpi-out" for="opt-dpi"></output></label>
+              <input type="range" id="opt-dpi" min="72" max="300" step="1">
+            </div>
+            <div class="field">
+              <label for="opt-quality">Image quality <output id="opt-quality-out" for="opt-quality"></output></label>
+              <input type="range" id="opt-quality" min="30" max="95" step="1">
+            </div>
+            <label class="check"><input type="checkbox" id="opt-gray"> <span>Convert images to grayscale</span></label>
+            <label class="check"><input type="checkbox" id="opt-meta"> <span>Remove document info (title, author, etc.)</span></label>
+            <div><button type="button" class="btn-link" id="opt-reset">Reset to defaults</button></div>
+          </div>
+        </details>
 
-    async function combinePDFs() {
-      if (combineFiles.length < 2) return;
-      
-      try {
-        _setStatus('Initializing…', 5);
-        combineBtn.disabled = true;
-        logArea.textContent = '';
-        
-        const mergedPdf = await PDFDocument.create();
-        const totalFiles = combineFiles.length;
-        
-        for (let i = 0; i < totalFiles; i++) {
-          const { file, pageCount } = combineFiles[i];
-          _setStatus(`Processing ${file.name}…`, 10 + (i / totalFiles) * 80);
-          _log(`Adding ${file.name} (${pageCount} pages)`);
-          
-          const data = await file.arrayBuffer();
-          const srcPdf = await PDFDocument.load(data);
-          const copiedPages = await mergedPdf.copyPages(srcPdf, srcPdf.getPageIndices());
-          
-          copiedPages.forEach(page => mergedPdf.addPage(page));
-        }
-        
-        _setStatus('Saving combined PDF…', 90);
-        const outBytes = await mergedPdf.save({ useObjectStreams: true });
-        const blob = new Blob([outBytes], { type: 'application/pdf' });
-        
-        _setStatus('Done!', 100);
-        
-        if (lastObjectURL) URL.revokeObjectURL(lastObjectURL);
-        lastObjectURL = URL.createObjectURL(blob);
-        
-        downloadLink.href = lastObjectURL;
-        downloadLink.download = 'combined.pdf';
-        downloadLink.style.display = 'block';
-        downloadLink.textContent = 'Download Combined PDF';
-        
-        const totalPages = mergedPdf.getPageCount();
-        statusText.textContent = 
-          `Combined ${totalFiles} files into ${totalPages} pages (${formatFileSize(blob.size)})`;
-        
-        _log(`\nSuccess! Combined ${totalFiles} files → ${totalPages} pages`);
-        
-      } catch (err) {
-        console.error(err);
-        showError('Combine failed: ' + err.message);
-      } finally {
-        combineBtn.disabled = combineFiles.length < 2;
-      }
-    }
+        <button type="button" class="btn btn-primary btn-block" id="compress-btn" disabled>Compress PDF</button>
 
-    // ==================== UTILITY FUNCTIONS ====================
-    function getTargetRatio() {
-      switch (compressionSel.value) {
-        case 'low':    return 0.8;
-        case 'high':   return 0.2;
-        default:       return 0.5;
-      }
-    }
-    function formatFileSize(b) {
-      if (b < 1024)      return b + ' bytes';
-      if (b < 1048576)   return (b/1024).toFixed(1) + ' KB';
-      return (b/1048576).toFixed(1) + ' MB';
-    }
-    function getCompressedFileName(n) {
-      const p = n.split('.');
-      const ext = p.pop();
-      return p.join('.') + '-compressed.' + ext;
-    }
-    function showError(msg) {
-      statusText.innerHTML = `<span class="error">${msg}</span>`;
-      progressBar.style.display = 'none';
-    }
-    function _setStatus(txt, pct) {
-      statusText.textContent = txt;
-      progressBar.style.display = 'block';
-      progressBar.value = pct;
-    }
-    function _log(msg) {
-      console.log(msg);
-      logArea.textContent += msg + '\n';
-    }
+        <div class="progress" id="compress-progress" hidden>
+          <div class="progress-row"><span id="compress-status" aria-live="polite">Starting…</span><button type="button" class="btn-link" id="compress-cancel">Cancel</button></div>
+          <div class="bar" role="progressbar" aria-labelledby="compress-status" aria-valuemin="0" aria-valuemax="100" id="compress-bar"><div></div></div>
+        </div>
+        <div class="alert" id="compress-error" role="alert" hidden></div>
+        <div class="result" id="compress-result" hidden tabindex="-1">
+          <h2 id="compress-headline"></h2>
+          <p class="sizes" id="compress-sizes"></p>
+          <p class="note" id="compress-note" hidden></p>
+          <div class="actions">
+            <a class="btn btn-primary" id="compress-download" download>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/></svg>
+              Download
+            </a>
+            <button type="button" class="btn btn-secondary" id="compress-share" hidden>Share</button>
+          </div>
+          <details class="details" id="compress-details">
+            <summary>Details</summary>
+            <dl id="compress-dl"></dl>
+          </details>
+        </div>
+      </section>
 
-    // ==================== TESTS ====================
-    runTestsBtn.addEventListener('click', runTests);
+      <!-- Combine -->
+      <section id="panel-combine" role="tabpanel" aria-labelledby="tab-combine" hidden>
+        <label class="drop" id="combine-drop" for="combine-input">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="12" height="14" rx="2"/><path d="M16 21H6a2 2 0 0 1-2-2V7"/></svg>
+          <span class="drop-title">Choose PDFs</span>
+          <span class="drop-hint desktop">or drop them here</span>
+        </label>
+        <input type="file" id="combine-input" class="visually-hidden" accept="application/pdf,.pdf" multiple>
 
-    async function runTests() {
-      testResultsEl.style.display = 'block';
-      testResultsEl.textContent = 'Running tests...\n\n';
-      
-      const results = { passed: 0, failed: 0 };
-      
-      // Test 1: formatFileSize
-      testLog('Test 1: formatFileSize');
-      assertEqual(formatFileSize(500), '500 bytes', 'bytes', results);
-      assertEqual(formatFileSize(1024), '1.0 KB', '1 KB', results);
-      assertEqual(formatFileSize(1536), '1.5 KB', '1.5 KB', results);
-      assertEqual(formatFileSize(1048576), '1.0 MB', '1 MB', results);
-      assertEqual(formatFileSize(2621440), '2.5 MB', '2.5 MB', results);
-      
-      // Test 2: getTargetRatio
-      testLog('\nTest 2: getTargetRatio');
-      compressionSel.value = 'low';
-      assertEqual(getTargetRatio(), 0.8, 'low compression', results);
-      compressionSel.value = 'medium';
-      assertEqual(getTargetRatio(), 0.5, 'medium compression', results);
-      compressionSel.value = 'high';
-      assertEqual(getTargetRatio(), 0.2, 'high compression', results);
-      compressionSel.value = 'medium'; // Reset
-      
-      // Test 3: getCompressedFileName
-      testLog('\nTest 3: getCompressedFileName');
-      assertEqual(getCompressedFileName('document.pdf'), 'document-compressed.pdf', 'simple name', results);
-      assertEqual(getCompressedFileName('my.report.pdf'), 'my.report-compressed.pdf', 'dotted name', results);
-      
-      // Test 4: PDF creation with PDF-lib
-      testLog('\nTest 4: PDF-lib PDF creation');
-      try {
-        const testPdf = await PDFDocument.create();
-        testPdf.addPage([612, 792]); // Letter size
-        testPdf.addPage([612, 792]);
-        const bytes = await testPdf.save();
-        assertTrue(bytes.length > 0, 'PDF created with content', results);
-        assertTrue(testPdf.getPageCount() === 2, 'PDF has 2 pages', results);
-      } catch (e) {
-        testFail('PDF creation failed: ' + e.message, results);
-      }
-      
-      // Test 5: PDF combining logic
-      testLog('\nTest 5: PDF combining logic');
-      try {
-        // Create two test PDFs
-        const pdf1 = await PDFDocument.create();
-        pdf1.addPage([612, 792]);
-        pdf1.addPage([612, 792]);
-        const bytes1 = await pdf1.save();
-        
-        const pdf2 = await PDFDocument.create();
-        pdf2.addPage([612, 792]);
-        pdf2.addPage([612, 792]);
-        pdf2.addPage([612, 792]);
-        const bytes2 = await pdf2.save();
-        
-        // Combine them
-        const mergedPdf = await PDFDocument.create();
-        const srcPdf1 = await PDFDocument.load(bytes1);
-        const srcPdf2 = await PDFDocument.load(bytes2);
-        
-        const pages1 = await mergedPdf.copyPages(srcPdf1, srcPdf1.getPageIndices());
-        const pages2 = await mergedPdf.copyPages(srcPdf2, srcPdf2.getPageIndices());
-        
-        pages1.forEach(p => mergedPdf.addPage(p));
-        pages2.forEach(p => mergedPdf.addPage(p));
-        
-        assertTrue(mergedPdf.getPageCount() === 5, 'Combined PDF has 5 pages (2+3)', results);
-        
-        const mergedBytes = await mergedPdf.save();
-        assertTrue(mergedBytes.length > 0, 'Combined PDF has content', results);
-      } catch (e) {
-        testFail('PDF combining failed: ' + e.message, results);
-      }
-      
-      // Test 6: Page ordering in combine
-      testLog('\nTest 6: Array reordering (combine file order)');
-      const testArray = [{ name: 'a' }, { name: 'b' }, { name: 'c' }];
-      // Simulate moving index 0 to index 2
-      const [moved] = testArray.splice(0, 1);
-      testArray.splice(2, 0, moved);
-      assertEqual(testArray.map(x => x.name).join(','), 'b,c,a', 'reorder 0→2', results);
-      
-      // Test 7: File validation
-      testLog('\nTest 7: File type validation');
-      const pdfFile = { type: 'application/pdf', name: 'test.pdf' };
-      const txtFile = { type: 'text/plain', name: 'test.txt' };
-      assertTrue(pdfFile.type === 'application/pdf', 'PDF type check passes', results);
-      assertTrue(txtFile.type !== 'application/pdf', 'Non-PDF type check fails correctly', results);
-      
-      // Summary
-      testLog(`\n${'='.repeat(40)}`);
-      testLog(`Tests complete: ${results.passed} passed, ${results.failed} failed`);
-      
-      if (results.failed === 0) {
-        testLog('\n✓ All tests passed!', 'pass');
-      } else {
-        testLog(`\n✗ ${results.failed} test(s) failed`, 'fail');
-      }
-    }
-    
-    function testLog(msg, type = '') {
-      let className = '';
-      if (type === 'pass') className = 'test-pass';
-      if (type === 'fail') className = 'test-fail';
-      
-      if (className) {
-        testResultsEl.innerHTML += `<span class="${className}">${msg}</span>\n`;
-      } else {
-        testResultsEl.textContent += msg + '\n';
-      }
-    }
-    
-    function assertEqual(actual, expected, description, results) {
-      if (actual === expected) {
-        testLog(`  ✓ ${description}: ${actual}`, 'pass');
-        results.passed++;
-      } else {
-        testLog(`  ✗ ${description}: expected "${expected}", got "${actual}"`, 'fail');
-        results.failed++;
-      }
-    }
-    
-    function assertTrue(condition, description, results) {
-      if (condition) {
-        testLog(`  ✓ ${description}`, 'pass');
-        results.passed++;
-      } else {
-        testLog(`  ✗ ${description}: condition was false`, 'fail');
-        results.failed++;
-      }
-    }
-    
-    function testFail(message, results) {
-      testLog(`  ✗ ${message}`, 'fail');
-      results.failed++;
-    }
-  </script>
+        <ol class="file-list" id="combine-list" aria-label="Files to combine, in order"></ol>
+        <p class="summary" id="combine-summary" hidden></p>
+        <div class="row" id="combine-row" hidden>
+          <button type="button" class="btn btn-secondary" id="combine-add">Add files</button>
+          <button type="button" class="btn btn-primary" id="combine-btn" disabled>Combine</button>
+        </div>
+
+        <div class="progress" id="combine-progress" hidden>
+          <div class="progress-row"><span id="combine-status" aria-live="polite">Starting…</span><button type="button" class="btn-link" id="combine-cancel">Cancel</button></div>
+          <div class="bar" role="progressbar" aria-labelledby="combine-status" aria-valuemin="0" aria-valuemax="100" id="combine-bar"><div></div></div>
+        </div>
+        <div class="alert" id="combine-error" role="alert" hidden></div>
+        <div class="result" id="combine-result" hidden tabindex="-1">
+          <h2 id="combine-headline"></h2>
+          <p class="sizes" id="combine-sizes"></p>
+          <div class="actions">
+            <a class="btn btn-primary" id="combine-download" download>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/></svg>
+              Download
+            </a>
+            <button type="button" class="btn btn-secondary" id="combine-share" hidden>Share</button>
+            <button type="button" class="btn btn-secondary" id="combine-compress">Compress it</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p class="privacy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        Your files never leave your device.
+      </p>
+      <p><a href="https://github.com/den-run-ai/pdfmini">Open source on GitHub</a></p>
+    </footer>
+  </div>
+  <noscript><p style="text-align:center">pdfmini needs JavaScript to process PDFs in your browser.</p></noscript>
 </body>
 </html>
