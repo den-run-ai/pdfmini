@@ -620,7 +620,16 @@
       return rgba;
     }
     if (cs.kind !== 'gray' && cs.kind !== 'rgb') return null;
-    const scale = bpc === 8 || bpc === 16 ? 1 : 255 / ((1 << bpc) - 1);
+    if (bpc === 8) { // common case: plain interleaved bytes
+      const n = w * h;
+      if (colors === 3) {
+        for (let i = 0, j = 0, o = 0; i < n; i++, j += 3, o += 4) { rgba[o] = data[j]; rgba[o + 1] = data[j + 1]; rgba[o + 2] = data[j + 2]; rgba[o + 3] = 255; }
+      } else {
+        for (let i = 0, o = 0; i < n; i++, o += 4) { const v = data[i]; rgba[o] = v; rgba[o + 1] = v; rgba[o + 2] = v; rgba[o + 3] = 255; }
+      }
+      return rgba;
+    }
+    const scale = bpc === 16 ? 1 : 255 / ((1 << bpc) - 1);
     for (let y = 0, o = 0; y < h; y++) {
       const row = y * rowLen;
       for (let x = 0; x < w; x++, o += 4) {
@@ -725,29 +734,50 @@
     const rowLen = width * bpp;
     const out = new Uint8Array((rowLen + 1) * height);
     const zero = new Uint8Array(rowLen);
-    const cand = [new Uint8Array(rowLen), new Uint8Array(rowLen), new Uint8Array(rowLen), new Uint8Array(rowLen), new Uint8Array(rowLen)];
+    const abs = (v) => { v &= 255; return v < 128 ? v : 256 - v; };
     for (let y = 0; y < height; y++) {
-      const row = data.subarray(y * rowLen, (y + 1) * rowLen);
-      const prev = y ? data.subarray((y - 1) * rowLen, y * rowLen) : zero;
-      const sums = [0, 0, 0, 0, 0];
+      const ro = y * rowLen;
+      const po = (y - 1) * rowLen;
+      const prev = y ? data : zero;
+      const pBase = y ? po : 0;
+      // Pass 1: score each filter type on this row.
+      let s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0;
       for (let x = 0; x < rowLen; x++) {
-        const v = row[x];
-        const a = x >= bpp ? row[x - bpp] : 0;
-        const b = prev[x];
-        const c = x >= bpp ? prev[x - bpp] : 0;
+        const v = data[ro + x];
+        const a = x >= bpp ? data[ro + x - bpp] : 0;
+        const b = prev[pBase + x];
+        const c = x >= bpp ? prev[pBase + x - bpp] : 0;
         const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-        const pred = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-        const f = [v, v - a, v - b, v - ((a + b) >> 1), v - pred];
-        for (let k = 0; k < 5; k++) {
-          const byte = f[k] & 255;
-          cand[k][x] = byte;
-          sums[k] += byte < 128 ? byte : 256 - byte;
-        }
+        s0 += v < 128 ? v : 256 - v;
+        s1 += abs(v - a);
+        s2 += abs(v - b);
+        s3 += abs(v - ((a + b) >> 1));
+        s4 += abs(v - (pa <= pb && pa <= pc ? a : pb <= pc ? b : c));
       }
-      let best = 0;
-      for (let k = 1; k < 5; k++) if (sums[k] < sums[best]) best = k;
-      out[y * (rowLen + 1)] = best;
-      out.set(cand[best], y * (rowLen + 1) + 1);
+      let best = 0, bestSum = s0;
+      if (s1 < bestSum) { best = 1; bestSum = s1; }
+      if (s2 < bestSum) { best = 2; bestSum = s2; }
+      if (s3 < bestSum) { best = 3; bestSum = s3; }
+      if (s4 < bestSum) best = 4;
+      // Pass 2: write the chosen filter.
+      const oo = y * (rowLen + 1);
+      out[oo] = best;
+      for (let x = 0; x < rowLen; x++) {
+        const v = data[ro + x];
+        const a = x >= bpp ? data[ro + x - bpp] : 0;
+        const b = prev[pBase + x];
+        let f;
+        if (best === 0) f = v;
+        else if (best === 1) f = v - a;
+        else if (best === 2) f = v - b;
+        else if (best === 3) f = v - ((a + b) >> 1);
+        else {
+          const c = x >= bpp ? prev[pBase + x - bpp] : 0;
+          const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+          f = v - (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+        }
+        out[oo + 1 + x] = f & 255;
+      }
     }
     return out;
   }
@@ -1090,7 +1120,9 @@
 
   async function recompressImages(doc, opts, report) {
     const ctx = doc.context;
-    const { placements } = scanImagePlacements(doc);
+    const scan = scanImagePlacements(doc);
+    // A partial scan could miss a larger use of an image; then trust none of it.
+    const placements = scan.complete ? scan.placements : new Map();
     const fallbackPts = maxPageSize(doc);
     const images = collectImages(doc);
     const stats = { images: images.length, recompressed: 0, kept: 0, imageBytesBefore: 0, imageBytesAfter: 0 };
@@ -1288,7 +1320,8 @@
       if (!(obj instanceof PDFLib.PDFRawStream) || obj.contents.length < 256) continue;
       const type = obj.dict.get(N('Type'));
       if (type === N('XRef') || type === N('ObjStm') || type === N('Metadata')) continue;
-      const key = hashBytes(obj.contents) + '|' + obj.dict.toString();
+      const dictKey = obj.dict.entries().filter(([k]) => k !== N('Length')).map(([k, v]) => `${k}${v}`).join('');
+      const key = hashBytes(obj.contents) + '|' + dictKey;
       const list = buckets.get(key);
       if (!list) { buckets.set(key, [[ref, obj]]); continue; }
       const match = list.find(([, o]) => sameBytes(o.contents, obj.contents));
@@ -1475,7 +1508,14 @@
     checkAbort(settings.signal);
     progress(0.1, 'Analyzing images');
     await nextFrame();
-    const imageStats = await recompressImages(doc, settings, (f, msg) => progress(0.1 + f * 0.75, msg));
+    let imageStats;
+    try {
+      imageStats = await recompressImages(doc, settings, (f, msg) => progress(0.1 + f * 0.75, msg));
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
+      // Replacements are atomic, so the document is still valid: keep going losslessly.
+      imageStats = { imageError: String((e && e.message) || e) };
+    }
     checkAbort(settings.signal);
     progress(0.86, 'Optimizing structure');
     await nextFrame();
@@ -1514,6 +1554,11 @@
       throw new PDFMiniError('invalid', 'This file could not be read as a PDF. It may be damaged.');
     }
     const out = await PDFLib.PDFDocument.create({ updateMetadata: false });
+    const pending = [];
+    const addPage = async ({ jpeg, width, height }) => {
+      const img = await out.embedJpg(await jpeg);
+      out.addPage([width, height]).drawImage(img, { x: 0, y: 0, width, height });
+    };
     try {
       const n = pdf.numPages;
       for (let i = 1; i <= n; i++) {
@@ -1535,11 +1580,11 @@
           page.cleanup();
         }
         const gray = settings.gray || isGrayscale(rgba);
-        const jpeg = await encodeJpeg(rgba, w, h, { quality: settings.quality, gray });
-        const img = await out.embedJpg(jpeg);
-        const p = out.addPage([base.width, base.height]);
-        p.drawImage(img, { x: 0, y: 0, width: base.width, height: base.height });
+        // Encode in the background while the next page renders; add pages in order.
+        pending.push({ jpeg: encodeJpeg(rgba, w, h, { quality: settings.quality, gray }), width: base.width, height: base.height });
+        if (pending.length > 2) await addPage(pending.shift());
       }
+      while (pending.length) await addPage(pending.shift());
       try {
         const meta = await pdf.getMetadata();
         const info = (meta && meta.info) || {};

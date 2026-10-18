@@ -154,3 +154,20 @@ test('controls are large enough to tap', async ({ page, isMobile }) => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(overflow).toBe(false);
 });
+
+test('warns that a digital signature will not survive', async ({ page }) => {
+  await compressFile(page, F.signed);
+  await expect(page.locator('#compress-note')).toBeVisible();
+  await expect(page.locator('#compress-note')).toContainText('digitally signed');
+  await compressFile(page, F.photo);
+  await expect(page.locator('#compress-note')).toBeHidden();
+});
+
+test('the file chooser is reachable and visible with the keyboard', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'no hardware keyboard');
+  await page.focus('#tab-compress');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('#compress-input')).toBeFocused();
+  const outline = await page.locator('#compress-drop').evaluate((el) => getComputedStyle(el).outlineStyle);
+  expect(outline).not.toBe('none');
+});

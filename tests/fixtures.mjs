@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  PDFDocument, PDFName, PDFNumber, StandardFonts, degrees, rgb,
+  PDFDocument, PDFName, PDFNumber, PDFString, StandardFonts, degrees, rgb,
   pushGraphicsState, popGraphicsState, concatTransformationMatrix, drawObject,
 } from 'pdf-lib';
 
@@ -160,6 +160,26 @@ export async function rotatedPdf() {
   return finish(doc);
 }
 
+/** A photo page carrying a (dummy) digital signature field. */
+export async function signedPdf() {
+  const doc = await PDFDocument.load(await photoPdf());
+  const ctx = doc.context;
+  const sig = ctx.obj({ Type: 'Sig', Filter: 'Adobe.PPKLite', SubFilter: 'adbe.pkcs7.detached' });
+  const field = ctx.register(ctx.obj({ FT: 'Sig', T: PDFString.of('Signature1'), V: ctx.register(sig), Type: 'Annot', Subtype: 'Widget', Rect: [0, 0, 0, 0] }));
+  doc.catalog.set(PDFName.of('AcroForm'), ctx.obj({ SigFlags: 3, Fields: [field] }));
+  return finish(doc);
+}
+
+/** A photo PDF that declares PDF/A-1b conformance in its XMP metadata. */
+export async function pdfa1Pdf() {
+  const doc = await PDFDocument.load(await photoPdf());
+  const xmp = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
+    '<rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" pdfaid:part="1" pdfaid:conformance="B"/></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
+  const meta = doc.context.register(doc.context.stream(xmp, { Type: 'Metadata', Subtype: 'XML' }));
+  doc.catalog.set(PDFName.of('Metadata'), meta);
+  return finish(doc);
+}
+
 /** Pages of a given size (for combine order checks). */
 export async function sizedPdf(sizes, label) {
   const doc = await PDFDocument.create();
@@ -173,7 +193,7 @@ function drawXObject(page, name, ref, m) {
   page.pushOperators(pushGraphicsState(), concatTransformationMatrix(...m), drawObject(name), popGraphicsState());
 }
 
-const builders = { photoPdf, textPdf, pngAlphaPdf, mixedImagesPdf, formXObjectPdf, rotatedPdf };
+const builders = { photoPdf, textPdf, pngAlphaPdf, mixedImagesPdf, formXObjectPdf, rotatedPdf, signedPdf, pdfa1Pdf };
 
 /** Write all fixtures to a temp dir (once per process) and return their paths. */
 let cache = null;

@@ -81,6 +81,7 @@
       text-align: center; cursor: pointer; transition: border-color .15s, background-color .15s;
     }
     .drop:hover, .drop.dragging { border-color: var(--accent); background: var(--accent-soft); }
+    input[type="file"]:focus-visible + .drop { outline: 2px solid var(--focus); outline-offset: 2px; }
     .drop svg { width: 40px; height: 40px; color: var(--accent-text); }
     .drop-title { font-weight: 650; font-size: 17px; }
     .drop-hint { color: var(--muted); font-size: 14px; }
@@ -196,6 +197,7 @@
     .privacy svg { width: 16px; height: 16px; }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
   </style>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <script defer src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" integrity="sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI" crossorigin="anonymous"></script>
   <script defer src="js/jpeg.js"></script>
   <script defer src="js/engine.js"></script>
@@ -219,12 +221,12 @@
 
       <!-- Compress -->
       <section id="panel-compress" role="tabpanel" aria-labelledby="tab-compress">
+        <input type="file" id="compress-input" class="visually-hidden" accept="application/pdf,.pdf">
         <label class="drop" id="compress-drop" for="compress-input">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2"/></svg>
           <span class="drop-title">Choose a PDF</span>
           <span class="drop-hint desktop">or drop it here</span>
         </label>
-        <input type="file" id="compress-input" class="visually-hidden" accept="application/pdf,.pdf">
 
         <div class="file-card" id="compress-file" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
@@ -296,12 +298,12 @@
 
       <!-- Combine -->
       <section id="panel-combine" role="tabpanel" aria-labelledby="tab-combine" hidden>
+        <input type="file" id="combine-input" class="visually-hidden" accept="application/pdf,.pdf" multiple>
         <label class="drop" id="combine-drop" for="combine-input">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="12" height="14" rx="2"/><path d="M16 21H6a2 2 0 0 1-2-2V7"/></svg>
           <span class="drop-title">Choose PDFs</span>
           <span class="drop-hint desktop">or drop them here</span>
         </label>
-        <input type="file" id="combine-input" class="visually-hidden" accept="application/pdf,.pdf" multiple>
 
         <ol class="file-list" id="combine-list" aria-label="Files to combine, in order"></ol>
         <p class="summary" id="combine-summary" hidden></p>

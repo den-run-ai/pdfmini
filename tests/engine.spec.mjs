@@ -144,3 +144,18 @@ test('JPEG encoder output is byte-identical to Node in every browser', async ({ 
   }, { b64: px.toString('base64'), w, h });
   expect(actual).toBe(expected);
 });
+
+test('PDF/A-1 files are written without object streams', async ({ page }) => {
+  const res = await compressInPage(page, F.pdfa1, { level: 'balanced' });
+  expect(res.improved).toBe(true);
+  expect(res.stats.pdfa).toBe(1);
+  expect(res.bytes.includes(Buffer.from('/ObjStm'))).toBe(false);
+  expect(res.bytes.subarray(0, 8).toString()).toBe('%PDF-1.7');
+});
+
+test('signed PDFs are flagged so the UI can warn', async ({ page }) => {
+  const res = await compressInPage(page, F.signed, { level: 'balanced' });
+  expect(res.stats.signed).toBe(true);
+  const plain = await compressInPage(page, F.photo, { level: 'balanced' });
+  expect(plain.stats.signed).toBe(false);
+});

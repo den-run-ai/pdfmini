@@ -4,6 +4,9 @@
 
   const $ = (id) => document.getElementById(id);
   const engine = window.PDFMini;
+  const compressInput = $('compress-input');
+  const combineInput = $('combine-input');
+  const touchOnly = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
   const STORE_KEY = 'pdfmini.settings.v2';
 
   // ------------------------------------------------------------ helpers
@@ -205,8 +208,10 @@
     }
     compress.file = file;
     $('compress-name').textContent = file.name;
-    $('compress-meta').textContent = formatBytes(file.size);
+    const large = file.size > 150 * 1024 * 1024 && touchOnly;
+    $('compress-meta').textContent = formatBytes(file.size) + (large ? ' · large file, may be slow on this device' : '');
     $('compress-drop').hidden = true;
+    compressInput.tabIndex = -1; // "Change" is the visible control now
     $('compress-file').hidden = false;
     $('compress-btn').disabled = false;
     setState('compress', 'ready');
@@ -219,7 +224,6 @@
     setState('compress', 'error');
   }
 
-  const compressInput = $('compress-input');
   compressInput.addEventListener('change', () => {
     if (compressInput.files[0]) setCompressFile(compressInput.files[0]);
     compressInput.value = ''; // allow picking the same file again
@@ -341,7 +345,6 @@
     dragId: null,
   };
   const list = $('combine-list');
-  const touchOnly = window.matchMedia && window.matchMedia('(hover: none)').matches;
 
   function resetCombineOutput() {
     $('combine-result').hidden = true;
@@ -438,6 +441,7 @@
     $('combine-row').hidden = items.length === 0;
     $('combine-drop').querySelector('.drop-title').textContent = items.length ? 'Add more PDFs' : 'Choose PDFs';
     $('combine-drop').hidden = items.length > 0;
+    combineInput.tabIndex = items.length > 0 ? -1 : 0;
     const summary = $('combine-summary');
     summary.hidden = items.length === 0;
     if (items.length) {
@@ -489,7 +493,6 @@
     renderCombine();
   });
 
-  const combineInput = $('combine-input');
   combineInput.addEventListener('change', () => {
     addCombineFiles(Array.from(combineInput.files));
     combineInput.value = '';
