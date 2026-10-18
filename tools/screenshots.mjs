@@ -41,7 +41,9 @@ for (const { name, ...opts } of variants) {
   await page.waitForSelector('body[data-app="ready"]');
   await page.screenshot({ path: path.join(outDir, `${name}-1-idle.png`), fullPage: true });
   await page.click('#advanced summary');
+  await page.waitForTimeout(300); // let the chevron transition finish
   await page.screenshot({ path: path.join(outDir, `${name}-2-advanced.png`), fullPage: true });
+  await page.locator('#advanced summary').screenshot({ path: path.join(outDir, `${name}-2b-summary.png`) });
   await page.click('#advanced summary');
   if (sample) {
     await page.setInputFiles('#compress-input', sample);

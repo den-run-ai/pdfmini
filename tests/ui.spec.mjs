@@ -171,3 +171,14 @@ test('the file chooser is reachable and visible with the keyboard', async ({ pag
   const outline = await page.locator('#compress-drop').evaluate((el) => getComputedStyle(el).outlineStyle);
   expect(outline).not.toBe('none');
 });
+
+test('changing settings clears a result made with the old settings', async ({ page }) => {
+  await compressFile(page, F.photo);
+  await expect(page.locator('#compress-result')).toBeVisible();
+  await page.click('label.level:has(input[value="strong"])');
+  await expect(page.locator('#compress-result')).toBeHidden();
+  await expect(page.locator('body')).toHaveAttribute('data-compress', 'ready');
+  await page.click('#compress-btn');
+  await expect(page.locator('body')).toHaveAttribute('data-compress', 'done');
+  await expect(page.locator('#compress-dl')).toContainText(`${await page.evaluate(() => window.PDFMini.LEVELS.strong.dpi)} dpi`);
+});

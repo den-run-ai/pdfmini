@@ -152,15 +152,18 @@
   }
 
   function persist() {
+    // Only remember resolution/quality the user changed, so new defaults still apply.
+    const d = levelDefaults();
+    const dpi = Number(opt.dpi.value), quality = Number(opt.quality.value);
     saveSettings({
-      level: currentLevel(), mode: opt.mode.value, dpi: Number(opt.dpi.value), quality: Number(opt.quality.value),
-      gray: opt.gray.checked, meta: opt.meta.checked,
+      level: currentLevel(), mode: opt.mode.value, gray: opt.gray.checked, meta: opt.meta.checked,
+      dpi: dpi !== d.dpi ? dpi : undefined, quality: quality !== d.quality ? quality : undefined,
     });
   }
 
   levelInputs.forEach((r) => {
     if (stored.level && r.value === stored.level) r.checked = true;
-    r.addEventListener('change', () => { applyLevelDefaults(); persist(); });
+    r.addEventListener('change', () => { applyLevelDefaults(); persist(); settingsChanged(); });
   });
   applyLevelDefaults();
   if (stored.dpi) opt.dpi.value = stored.dpi;
@@ -170,8 +173,8 @@
   opt.meta.checked = !!stored.meta;
   refreshAdvanced();
   for (const el of Object.values(opt)) {
-    el.addEventListener('input', () => { refreshAdvanced(); persist(); });
-    el.addEventListener('change', () => { refreshAdvanced(); persist(); });
+    el.addEventListener('input', () => { refreshAdvanced(); persist(); settingsChanged(); });
+    el.addEventListener('change', () => { refreshAdvanced(); persist(); settingsChanged(); });
   }
   $('opt-reset').addEventListener('click', () => {
     opt.mode.value = 'images';
@@ -179,7 +182,16 @@
     opt.meta.checked = false;
     applyLevelDefaults();
     persist();
+    settingsChanged();
   });
+
+  /** A result made with other settings is stale: hide it so Download never means the old file. */
+  function settingsChanged() {
+    if (!compress.controller && compress.file && !$('compress-result').hidden) {
+      resetCompressOutput();
+      setState('compress', 'ready');
+    }
+  }
 
   // ---------------------------------------------------- compress: flow
 
@@ -439,7 +451,6 @@
     const pending = items.some((it) => it.pages == null && !it.error);
     const hasErrors = items.some((it) => it.error);
     $('combine-row').hidden = items.length === 0;
-    $('combine-drop').querySelector('.drop-title').textContent = items.length ? 'Add more PDFs' : 'Choose PDFs';
     $('combine-drop').hidden = items.length > 0;
     combineInput.tabIndex = items.length > 0 ? -1 : 0;
     const summary = $('combine-summary');
@@ -553,7 +564,11 @@
 
   let dragDepth = 0;
   const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
-  const dropZone = () => $(`${activePanel()}-drop`);
+  const dropZone = () => {
+    const panel = activePanel();
+    const zone = $(`${panel}-drop`);
+    return zone.hidden ? $(panel === 'compress' ? 'compress-file' : 'combine-list') : zone;
+  };
   document.addEventListener('dragenter', (e) => {
     if (!hasFiles(e)) return;
     dragDepth++;
