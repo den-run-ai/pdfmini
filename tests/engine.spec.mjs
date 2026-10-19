@@ -1,7 +1,7 @@
 // Engine tests in real browsers (tests/harness.html loads only the engine).
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { test, expect, openHarness, compressInPage, imagesOf, pageSizes, textOf, contentStreams } from './helpers.mjs';
+import { test, expect, openHarness, compressInPage, imagesOf, pageSizes, textOf, contentStreams, renderPages, formXObjectCount, formInfo } from './helpers.mjs';
 import { fixtureFiles, photoPixels } from './fixtures.mjs';
 
 let F;
@@ -79,6 +79,41 @@ test('images inside form XObjects are sized by their real placement', async ({ p
   // Form scales 1600x1200 by 0.25: drawn 400 x 300 pt = 5.56 x 4.17 in.
   const dpi = res.stats.settings.dpi;
   expect(Math.abs(img.width - Math.round(2000 * dpi / (2000 / (400 / 72))))).toBeLessThanOrEqual(1);
+});
+
+test('flattened form fields are drawn inline and look identical', async ({ page }) => {
+  const input = fs.readFileSync(F.flattenedForm);
+  const res = await compressInPage(page, F.flattenedForm, { level: 'balanced' });
+  expect(res.improved).toBe(true);
+  expect(res.stats.inlined).toBe(40);
+  // The form drawn twice, the transparency group and the form with an
+  // unclosed marked-content sequence stay XObjects.
+  expect(await formXObjectCount(res.bytes)).toBe(3);
+  expect(res.bytes.length).toBeLessThan(input.length * 0.6);
+  expect(await textOf(res.bytes)).toEqual(await textOf(input));
+  const before = await renderPages(input, 1.5);
+  const after = await renderPages(res.bytes, 1.5);
+  expect(after).toHaveLength(before.length);
+  // Same fonts (renamed where /F1 clashed), clipping and transforms.
+  for (let i = 0; i < before.length; i++) expect(Buffer.compare(after[i], before[i]), `page ${i + 1}`).toBe(0);
+  const b = res.stats.breakdown;
+  expect(b.images + b.fonts + b.drawings + b.other).toBe(input.length);
+  expect(b.drawings).toBeGreaterThan(0);
+});
+
+test('drops the XFA copy of static forms and stale usage rights', async ({ page }) => {
+  const input = fs.readFileSync(F.xfaForm);
+  expect(await formInfo(input)).toMatchObject({ xfa: true, perms: true });
+  const res = await compressInPage(page, F.xfaForm, { level: 'balanced' });
+  expect(res.improved).toBe(true);
+  expect(res.stats).toMatchObject({ xfaRemoved: true, usageRights: true });
+  expect(await formInfo(res.bytes)).toEqual({ xfa: false, perms: false, fields: { name: 'Jane Q Taxpayer' } });
+  const [before, after] = [await renderPages(input), await renderPages(res.bytes)];
+  expect(Buffer.compare(after[0], before[0])).toBe(0);
+  // Dynamic XFA forms only show placeholder pages without their XFA.
+  const dynamic = await compressInPage(page, F.xfaDynamic, { level: 'balanced' });
+  expect(dynamic.stats.xfaRemoved).toBe(false);
+  expect((await formInfo(dynamic.bytes)).xfa).toBe(true);
 });
 
 test('grayscale option converts images to 1-channel JPEG', async ({ page }) => {

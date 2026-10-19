@@ -60,6 +60,28 @@ test('reports when a file is already optimized instead of growing it', async ({ 
   await expect(page.locator('body')).toHaveAttribute('data-compress', 'unchanged');
   await expect(page.locator('#compress-headline')).toHaveText('Already well optimized');
   await expect(page.locator('#compress-download')).toBeHidden();
+  // Mostly images: stronger settings or page images may still help.
+  await expect(page.locator('#compress-sizes')).toContainText('Convert pages to images');
+});
+
+test('does not suggest page images for PDFs that are mostly text', async ({ page }) => {
+  await compressFile(page, F.text);
+  await expect(page.locator('body')).toHaveAttribute('data-compress', 'done');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#compress-download')]);
+  const once = `${F.text}.ui-once.pdf`;
+  fs.copyFileSync(await download.path(), once);
+  await compressFile(page, once);
+  await expect(page.locator('body')).toHaveAttribute('data-compress', 'unchanged');
+  await expect(page.locator('#compress-sizes')).toHaveText('This PDF is mostly text and drawings, which are already stored compactly.');
+  await page.click('#compress-details summary');
+  await expect(page.locator('#compress-dl')).toContainText('text and drawings');
+});
+
+test('shows what a flattened form was cleaned of', async ({ page }) => {
+  await compressFile(page, F.flattenedForm);
+  await expect(page.locator('body')).toHaveAttribute('data-compress', 'done');
+  await page.click('#compress-details summary');
+  await expect(page.locator('#compress-dl')).toContainText('40 small graphics merged into their pages');
 });
 
 test('shows a clear error for files that are not PDFs', async ({ page }) => {

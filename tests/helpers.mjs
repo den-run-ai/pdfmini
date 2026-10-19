@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { test as base, expect } from '@playwright/test';
 import { PDFDocument, PDFName, PDFRawStream, PDFRef, PDFArray, decodePDFRawStream } from 'pdf-lib';
 import { routeCdn } from '../tools/cdn-routes.mjs';
@@ -79,6 +80,44 @@ export async function textOf(bytes) {
     const page = await pdf.getPage(i);
     const tc = await page.getTextContent();
     pages.push(tc.items.map((it) => it.str).join(' ').replace(/\s+/g, ' ').trim());
+  }
+  await task.destroy();
+  return pages;
+}
+
+/** Number of Form XObjects in a PDF. */
+export async function formXObjectCount(bytes) {
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  let n = 0;
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (obj instanceof PDFRawStream && obj.dict.get(PDFName.of('Subtype')) === PDFName.of('Form')) n++;
+  }
+  return n;
+}
+
+/** Whether a PDF has XFA data and usage rights, and its text field values. */
+export async function formInfo(bytes) {
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  const acroForm = doc.catalog.lookup(PDFName.of('AcroForm'));
+  const info = { xfa: !!acroForm && acroForm.has(PDFName.of('XFA')), perms: doc.catalog.has(PDFName.of('Perms')) };
+  // pdf-lib strips XFA (with a warning) when asked for the form.
+  info.fields = info.xfa ? null : Object.fromEntries(doc.getForm().getFields().map((f) => [f.getName(), f.getText()]));
+  return info;
+}
+
+/** RGBA pixels of every page rendered by PDF.js, to check output looks identical. */
+export async function renderPages(bytes, scale = 1) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const fonts = fileURLToPath(new URL('../node_modules/pdfjs-dist/standard_fonts/', import.meta.url));
+  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), verbosity: 0, isEvalSupported: false, standardFontDataUrl: fonts });
+  const pdf = await task.promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const { canvas, context } = pdf.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    await page.render({ canvasContext: context, canvas, viewport }).promise;
+    pages.push(Buffer.from(context.getImageData(0, 0, canvas.width, canvas.height).data));
   }
   await task.destroy();
   return pages;

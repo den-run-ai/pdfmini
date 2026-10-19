@@ -286,8 +286,17 @@
     }
   }
 
+  function cleanupSummary(stats) {
+    const parts = [];
+    if (stats.inlined) parts.push(`${stats.inlined.toLocaleString()} small graphics merged into their pages`);
+    if (stats.xfaRemoved) parts.push('duplicate Adobe XFA form data removed');
+    if (stats.duplicates) parts.push(`${stats.duplicates.toLocaleString()} duplicate objects merged`);
+    return parts.join(', ');
+  }
+
   function showCompressResult(file, result) {
     const { stats } = result;
+    const b = stats.breakdown;
     const box = $('compress-result');
     const download = $('compress-download');
     const share = $('compress-share');
@@ -304,11 +313,16 @@
       box.classList.remove('neutral');
     } else {
       $('compress-headline').textContent = 'Already well optimized';
-      const tips = [];
-      if (currentLevel() !== 'strong') tips.push('choose Strong');
-      if (opt.mode.value === 'images') tips.push('try “Convert pages to images” in Advanced settings');
-      $('compress-sizes').textContent = 'This PDF could not be made smaller with these settings' +
-        (tips.length ? `. To go further, ${tips.join(', or ')}.` : '.');
+      if (b && b.images < stats.inputSize * 0.3) {
+        // Stronger image settings can't help, and page images would be bigger than text.
+        $('compress-sizes').textContent = 'This PDF is mostly text and drawings, which are already stored compactly.';
+      } else {
+        const tips = [];
+        if (currentLevel() !== 'strong') tips.push('choose Strong');
+        if (opt.mode.value === 'images') tips.push('try “Convert pages to images” in Advanced settings');
+        $('compress-sizes').textContent = 'This PDF could not be made smaller with these settings' +
+          (tips.length ? `. To go further, ${tips.join(', or ')}.` : '.');
+      }
       download.hidden = true;
       share.hidden = true;
       box.classList.add('neutral');
@@ -316,10 +330,13 @@
     const note = $('compress-note');
     note.hidden = !(result.improved && stats.signed);
     note.textContent = 'This PDF was digitally signed. The compressed copy keeps the content but not the signature.';
+    const pct = (n) => `${Math.round((100 * n) / stats.inputSize)}%`;
     const rows = [
       ['Method', result.mode === 'rasterize' ? 'Pages converted to images' : 'Text kept, images compressed'],
       ['Pages', stats.pages],
-      ['Images', stats.images != null ? `${stats.recompressed} of ${stats.images} re-encoded` : null],
+      ['Original', b ? `images ${pct(b.images)}, fonts ${pct(b.fonts)}, text and drawings ${pct(b.drawings)}, other ${pct(b.other)}` : null],
+      ['Images', stats.images ? `${stats.recompressed} of ${stats.images} re-encoded` : null],
+      ['Cleanup', result.improved ? cleanupSummary(stats) : null],
       ['Settings', `${stats.settings.dpi} dpi, quality ${stats.settings.quality}${stats.settings.gray ? ', grayscale' : ''}`],
       ['Time', `${(stats.ms / 1000).toFixed(1)} s`],
     ];
