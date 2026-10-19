@@ -1366,7 +1366,7 @@
     const buckets = new Map();
     const replace = new Map();
     for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
-      if (!(obj instanceof PDFLib.PDFRawStream) || obj.contents.length < 256) continue;
+      if (!(obj instanceof PDFLib.PDFRawStream) || obj.contents.length < 32) continue;
       const type = obj.dict.get(N('Type'));
       if (type === N('XRef') || type === N('ObjStm') || type === N('Metadata')) continue;
       const dictKey = obj.dict.entries().filter(([k]) => k !== N('Length')).map(([k, v]) => `${k}${v}`).join('');
@@ -1445,6 +1445,411 @@
       ctx.assign(ref, PDFLib.PDFRawStream.of(dict, contents));
     }
     return saved;
+  }
+
+  // --------------------------------------------- inline single-use forms
+
+  // Operators that name a resource: [category, operand position from the end].
+  const RESOURCE_OPS = {
+    Tf: ['Font', 2], Do: ['XObject', 1], gs: ['ExtGState', 1], cs: ['ColorSpace', 1], CS: ['ColorSpace', 1],
+    sh: ['Shading', 1], BDC: ['Properties', 1], DP: ['Properties', 1],
+  };
+  // Operators a form must not contain to be inlined: inline images, Type 3
+  // glyph metrics, compatibility sections and PostScript.
+  const NO_INLINE_OPS = new Set(['BI', 'ID', 'd0', 'd1', 'BX', 'PS']);
+  const MAX_INLINE_FORM_BYTES = 256 * 1024;
+  const MCID = [0x2f, 0x4d, 0x43, 0x49, 0x44]; // "/MCID"
+
+  /**
+   * Tokenize a content stream, calling onOp(op, operands, start, end) for
+   * every operator; returning false from onOp stops the scan. Operands are
+   * {name: true, s, e} for names (s..e excludes the slash) or {s, e}.
+   * Inline image data is skipped after reporting "ID". Returns false if the
+   * scan stopped early or the token budget ran out.
+   */
+  function scanOps(b, onOp, budget) {
+    const n = b.length;
+    const ops = [];
+    let i = 0;
+    while (i < n) {
+      const c = b[i];
+      if (WS[c]) { i++; continue; }
+      if (--budget.left < 0) return false;
+      if (c === 0x25) { while (i < n && b[i] !== 10 && b[i] !== 13) i++; continue; }
+      let j;
+      if (c === 0x2f) {
+        j = i + 1;
+        while (j < n && !WS[b[j]] && !DELIM[b[j]]) j++;
+        ops.push({ name: true, s: i + 1, e: j });
+      } else if (c === 0x28) {
+        j = skipLiteralString(b, i);
+        ops.push({ s: i, e: j });
+      } else if (c === 0x5b || (c === 0x3c && b[i + 1] === 0x3c)) {
+        j = skipComposite(b, i);
+        ops.push({ s: i, e: j });
+      } else if (c === 0x3c) {
+        j = i;
+        while (j < n && b[j] !== 0x3e) j++;
+        j++;
+        ops.push({ s: i, e: j });
+      } else if (DELIM[c]) {
+        j = i + 1; // stray delimiter
+      } else {
+        j = i;
+        while (j < n && !WS[b[j]] && !DELIM[b[j]]) j++;
+        if ((c >= 0x30 && c <= 0x39) || c === 0x2b || c === 0x2d || c === 0x2e) {
+          ops.push({ s: i, e: j });
+        } else {
+          const op = ascii(b, i, j);
+          if (op === 'true' || op === 'false' || op === 'null') {
+            ops.push({ s: i, e: j });
+          } else {
+            if (onOp(op, ops, i, j) === false) return false;
+            if (op === 'ID') j = skipInlineImage(b, j);
+            ops.length = 0;
+          }
+        }
+      }
+      i = j;
+    }
+    // Operands left without an operator are reported as op ''.
+    return !ops.length || onOp('', ops, n, n) !== false;
+  }
+
+  /** The resource name an operator uses, as {cat, key, s, e}, or null. */
+  function resourceUse(b, op, args) {
+    const spec = RESOURCE_OPS[op];
+    const a = spec && args[args.length - spec[1]];
+    if (!a || !a.name) return null;
+    return { cat: spec[0], key: L().PDFName.of(ascii(b, a.s, a.e)), s: a.s - 1, e: a.e };
+  }
+
+  /** How many times each indirect object is referenced. */
+  function refCounts(doc) {
+    const ctx = doc.context;
+    const PDFLib = L();
+    const counts = new Map();
+    const stack = [];
+    for (const [, obj] of ctx.enumerateIndirectObjects()) stack.push(obj);
+    for (const k of ['Root', 'Info', 'Encrypt']) if (ctx.trailerInfo[k]) stack.push(ctx.trailerInfo[k]);
+    while (stack.length) {
+      const v = stack.pop();
+      if (v instanceof PDFLib.PDFRef) counts.set(v, (counts.get(v) || 0) + 1);
+      else if (v instanceof PDFLib.PDFDict) { for (const x of v.values()) stack.push(x); } else if (v instanceof PDFLib.PDFArray) { for (const x of v.asArray()) stack.push(x); } else if (v instanceof PDFLib.PDFStream) stack.push(v.dict);
+    }
+    return counts;
+  }
+
+  /** Decoded page contents, or null if any part can't be decoded. */
+  function contentBytes(ctx, contents) {
+    const list = contents instanceof L().PDFArray ? contents.asArray() : [contents];
+    const parts = [];
+    for (const item of list) {
+      const s = lookup(ctx, item);
+      const d = s instanceof L().PDFRawStream ? tryDecode(ctx, s) : null;
+      if (!d) return null;
+      parts.push(d);
+    }
+    return concatBytes(parts, 10);
+  }
+
+  function concatBytes(parts, sep) {
+    const total = parts.reduce((a, p) => a + p.length, 0) + (sep === undefined ? 0 : parts.length);
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const p of parts) {
+      out.set(p, o);
+      o += p.length;
+      if (sep !== undefined) out[o++] = sep;
+    }
+    return out;
+  }
+
+  function hasBytes(b, pat) {
+    outer: for (let i = 0, n = b.length - pat.length; i <= n; i++) {
+      for (let k = 0; k < pat.length; k++) if (b[i + k] !== pat[k]) continue outer;
+      return true;
+    }
+    return false;
+  }
+
+  /** A number as PDF content syntax (no exponents). */
+  function fmt(v) {
+    if (Number.isInteger(v)) return String(v);
+    const s = String(v);
+    return s.includes('e') ? v.toFixed(12).replace(/0+$/, '').replace(/\.$/, '') : s;
+  }
+
+  /** Whether a form's dictionary allows drawing it inline (see inlineForms). */
+  function inlinableForm(ctx, form) {
+    const PDFLib = L();
+    const d = form.dict;
+    if (d.get(N('Subtype')) !== N('Form')) return false;
+    // Transparency groups, optional content, tagged content and references
+    // to external content behave differently when drawn inline.
+    for (const k of ['Group', 'OC', 'Ref', 'OPI', 'StructParent', 'StructParents', 'Metadata']) if (d.has(N(k))) return false;
+    const numbers = (key, n) => {
+      const a = dictGet(ctx, d, key);
+      return a instanceof PDFLib.PDFArray && a.size() === n && a.asArray().every((x) => Number.isFinite(num(lookup(ctx, x), NaN)));
+    };
+    if (!numbers('BBox', 4) || (d.has(N('Matrix')) && !numbers('Matrix', 6))) return false;
+    const res = dictGet(ctx, d, 'Resources');
+    if (res instanceof PDFLib.PDFDict) {
+      // Patterns are positioned relative to the form's space, not the page's.
+      if (res.has(N('Pattern'))) return false;
+      // Type 3 glyphs without resources of their own use the form's.
+      const fonts = dictGet(ctx, res, 'Font');
+      if (fonts instanceof PDFLib.PDFDict) {
+        for (const f of fonts.values()) {
+          const font = lookup(ctx, f);
+          if (font instanceof PDFLib.PDFDict && font.get(N('Subtype')) === N('Type3') && !font.has(N('Resources'))) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
+   * The content that replaces "/Name Do" for a form, with its resources
+   * merged into the page's (renamed where a name means something else
+   * there). Returns null, without touching the page, if the form can't be
+   * inlined safely.
+   */
+  function inlineFormBody(ctx, form, privatize, taken, budget) {
+    const PDFLib = L();
+    const content = tryDecode(ctx, form);
+    if (!content || content.length > MAX_INLINE_FORM_BYTES || hasBytes(content, MCID)) return null;
+    // Validate the content and find the resource names it uses. Drawn inline,
+    // an unclosed text object or marked-content sequence (e.g. optional
+    // content) would leak into the rest of the page.
+    let depth = 0, marked = 0, inText = false;
+    const names = [];
+    const ok = scanOps(content, (op, args) => {
+      if (op === '' || NO_INLINE_OPS.has(op)) return false;
+      if (op === 'q') depth++;
+      else if (op === 'Q') { if (--depth < 0) return false; } else if (op === 'BT') { if (inText) return false; inText = true; } else if (op === 'ET') inText = false;
+      else if (op === 'BMC' || op === 'BDC') marked++;
+      else if (op === 'EMC') { if (--marked < 0) return false; }
+      const use = resourceUse(content, op, args);
+      if (use) names.push(use);
+      return true;
+    }, budget);
+    if (!ok || inText || marked) return null;
+
+    // Merge resources: a name keeps its spelling if the page has the same
+    // object under it or doesn't use it; otherwise it gets a fresh name.
+    const formRes = dictGet(ctx, form.dict, 'Resources');
+    const renamed = new Map();
+    const edits = [];
+    for (const use of names) {
+      const id = use.cat + use.key.asString();
+      if (!renamed.has(id)) {
+        let target = null;
+        const formCat = formRes instanceof PDFLib.PDFDict ? dictGet(ctx, formRes, use.cat) : undefined;
+        const value = formCat instanceof PDFLib.PDFDict ? formCat.get(use.key) : undefined;
+        // Names a form doesn't define resolve against the page, as before.
+        if (value !== undefined) {
+          const pageCat = privatize(use.cat);
+          const existing = pageCat.get(use.key);
+          if (existing === undefined && !taken(use.cat, use.key)) pageCat.set(use.key, value);
+          else if (existing !== value) {
+            // Reuse a name the page already has for this object.
+            let alias = pageCat.entries().find(([, v]) => v === value);
+            alias = alias && alias[0];
+            for (let k = 1; !alias; k++) {
+              const candidate = PDFLib.PDFName.of(`${use.key.decodeText()}_${k}`);
+              if (!pageCat.has(candidate) && !formCat.has(candidate) && !taken(use.cat, candidate)) alias = candidate;
+            }
+            pageCat.set(alias, value);
+            target = alias.asString();
+          }
+        }
+        renamed.set(id, target);
+      }
+      const target = renamed.get(id);
+      if (target) edits.push({ s: use.s, e: use.e, text: target });
+    }
+
+    const parts = [];
+    let pos = 0;
+    for (const ed of edits) {
+      parts.push(content.subarray(pos, ed.s), asciiBytes(ed.text));
+      pos = ed.e;
+    }
+    parts.push(content.subarray(pos));
+    // Do = save state, apply Matrix, clip to BBox, paint, restore (PDF 8.10.1).
+    const m = matrixOf(ctx, form.dict, 'Matrix');
+    const bb = dictGet(ctx, form.dict, 'BBox').asArray().map((x) => num(lookup(ctx, x), 0));
+    const [x0, x1] = [Math.min(bb[0], bb[2]), Math.max(bb[0], bb[2])];
+    const [y0, y1] = [Math.min(bb[1], bb[3]), Math.max(bb[1], bb[3])];
+    const identity = m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;
+    const head = `q\n${identity ? '' : m.map(fmt).join(' ') + ' cm\n'}${fmt(x0)} ${fmt(y0)} ${fmt(x1 - x0)} ${fmt(y1 - y0)} re W n\n`;
+    return concatBytes([asciiBytes(head), ...parts, asciiBytes('\n' + 'Q\n'.repeat(depth) + 'Q')]);
+  }
+
+  function asciiBytes(s) {
+    const out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+
+  /**
+   * Draw Form XObjects that a page uses exactly once directly in its content.
+   * Flattened form fields leave one tiny XObject per field, each paying for
+   * its own stream header and compressing poorly on its own; inlined, the
+   * same drawing costs a fraction. Rendering is unchanged. Returns the
+   * number of forms inlined.
+   */
+  async function inlineForms(doc, signal) {
+    const ctx = doc.context;
+    const PDFLib = L();
+    const counts = refCounts(doc);
+    const shared = (raw) => raw instanceof PDFLib.PDFRef && counts.get(raw) !== 1;
+    const budget = { left: 30e6 };
+    let inlined = 0;
+    for (const page of doc.getPages()) {
+      checkAbort(signal);
+      const node = page.node;
+      // Only the page's own, unshared resources can be edited safely.
+      const resRaw = node.get(N('Resources'));
+      const resources = lookup(ctx, resRaw);
+      if (!(resources instanceof PDFLib.PDFDict) || shared(resRaw)) continue;
+      const xoRaw = resources.get(N('XObject'));
+      const xobjects = lookup(ctx, xoRaw);
+      if (!(xobjects instanceof PDFLib.PDFDict) || shared(xoRaw)) continue;
+      const candidates = new Map();
+      for (const [key, ref] of xobjects.entries()) {
+        if (!(ref instanceof PDFLib.PDFRef) || counts.get(ref) !== 1) continue;
+        const form = ctx.lookup(ref);
+        if (form instanceof PDFLib.PDFRawStream && inlinableForm(ctx, form)) candidates.set(key, form);
+      }
+      const contents = node.get(N('Contents'));
+      if (!candidates.size || !contents) continue;
+      const bytes = contentBytes(ctx, contents);
+      if (!bytes) continue;
+
+      // Each candidate must be drawn once, outside text objects. Names the
+      // page uses (even ones it doesn't define) can't be given to a form.
+      const uses = new Map();
+      const pageNames = new Set();
+      let inText = false;
+      if (!scanOps(bytes, (op, args, s, e) => {
+        if (op === 'BT') inText = true;
+        else if (op === 'ET') inText = false;
+        const use = resourceUse(bytes, op, args);
+        if (!use) return true;
+        pageNames.add(use.cat + use.key.asString());
+        if (op === 'Do' && candidates.has(use.key)) {
+          const u = uses.get(use.key);
+          uses.set(use.key, u ? { many: true } : { s: use.s, e, ok: !inText && args.length === 1 });
+        }
+        return true;
+      }, budget)) break;
+      const taken = (cat, key) => pageNames.has(cat + key.asString());
+
+      // Resource changes go to copies until the page is known to shrink.
+      const staged = new Map();
+      const privatize = (cat) => {
+        if (!staged.has(cat)) {
+          const dict = lookup(ctx, resources.get(N(cat)));
+          const copy = ctx.obj({});
+          if (dict instanceof PDFLib.PDFDict) for (const [k, v] of dict.entries()) copy.set(k, v);
+          staged.set(cat, copy);
+        }
+        return staged.get(cat);
+      };
+      const edits = [];
+      for (const [key, u] of uses) {
+        if (u.many || !u.ok) continue;
+        const form = candidates.get(key);
+        const body = inlineFormBody(ctx, form, privatize, taken, budget);
+        if (body) edits.push({ s: u.s, e: u.e, body, key, cost: form.contents.length + form.dict.sizeInBytes() + 60 });
+      }
+      if (!edits.length) continue;
+      edits.sort((a, b) => a.s - b.s);
+      const parts = [];
+      let pos = 0;
+      const nl = asciiBytes('\n');
+      for (const ed of edits) {
+        parts.push(bytes.subarray(pos, ed.s), nl, ed.body, nl);
+        pos = ed.e;
+      }
+      parts.push(bytes.subarray(pos));
+      const compressed = await deflate(concatBytes(parts));
+      // Re-compressing a big page could cost more than the forms saved.
+      const list = contents instanceof PDFLib.PDFArray ? contents.asArray() : [contents];
+      const before = list.reduce((a, r) => a + lookup(ctx, r).contents.length, 0) + edits.reduce((a, ed) => a + ed.cost, 0);
+      if (compressed.length >= before) continue;
+      for (const [cat, dict] of staged) resources.set(N(cat), dict);
+      const xo = lookup(ctx, resources.get(N('XObject')));
+      for (const ed of edits) xo.delete(ed.key);
+      node.set(N('Contents'), ctx.register(PDFLib.PDFRawStream.of(ctx.obj({ Filter: 'FlateDecode' }), compressed)));
+      inlined += edits.length;
+    }
+    return inlined;
+  }
+
+  // ------------------------------------------------------- form cleanups
+
+  /**
+   * Drop the Adobe XFA copy of a static form. Static XFA forms carry a full
+   * AcroForm and page content (what every viewer except Acrobat shows), so
+   * the XFA template, often the largest part of government forms, is a
+   * duplicate. Dynamic forms (NeedsRendering) are left alone.
+   */
+  function removeStaticXfa(doc) {
+    const ctx = doc.context;
+    const PDFLib = L();
+    const form = lookup(ctx, doc.catalog.get(N('AcroForm')));
+    if (!(form instanceof PDFLib.PDFDict) || !form.has(N('XFA'))) return false;
+    const needs = lookup(ctx, doc.catalog.get(N('NeedsRendering')));
+    if (needs instanceof PDFLib.PDFBool && needs.asBoolean()) return false;
+    const fields = dictGet(ctx, form, 'Fields');
+    if (!(fields instanceof PDFLib.PDFArray) || fields.size() === 0) return false;
+    form.delete(N('XFA'));
+    return true;
+  }
+
+  /**
+   * Remove Adobe Reader usage rights. Their signature covers the original
+   * bytes, so after any rewrite Reader would warn that the document changed.
+   */
+  function removeUsageRights(doc) {
+    const ctx = doc.context;
+    const perms = lookup(ctx, doc.catalog.get(N('Perms')));
+    if (!(perms instanceof L().PDFDict)) return false;
+    let removed = false;
+    for (const k of ['UR', 'UR3']) if (perms.has(N(k))) { perms.delete(N(k)); removed = true; }
+    if (removed && perms.keys().length === 0) doc.catalog.delete(N('Perms'));
+    return removed;
+  }
+
+  /** Bytes of the original file by kind, for explaining results. */
+  function composition(doc, fileSize) {
+    const ctx = doc.context;
+    const PDFLib = L();
+    const fontFiles = new Set();
+    for (const [, obj] of ctx.enumerateIndirectObjects()) {
+      if (!(obj instanceof PDFLib.PDFDict) || obj.get(N('Type')) !== N('FontDescriptor')) continue;
+      for (const k of ['FontFile', 'FontFile2', 'FontFile3']) {
+        const r = obj.get(N(k));
+        if (r instanceof PDFLib.PDFRef) fontFiles.add(r);
+      }
+    }
+    const contents = new Set();
+    for (const page of doc.getPages()) {
+      const c = page.node.get(N('Contents'));
+      for (const r of c instanceof PDFLib.PDFArray ? c.asArray() : [c]) if (r instanceof PDFLib.PDFRef) contents.add(r);
+    }
+    let images = 0, fonts = 0, drawings = 0;
+    for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+      if (!(obj instanceof PDFLib.PDFRawStream)) continue;
+      const subtype = obj.dict.get(N('Subtype'));
+      if (subtype === N('Image')) images += obj.contents.length;
+      else if (fontFiles.has(ref)) fonts += obj.contents.length;
+      else if (subtype === N('Form') || contents.has(ref)) drawings += obj.contents.length;
+    }
+    return { images, fonts, drawings, other: Math.max(0, fileSize - images - fonts - drawings) };
   }
 
   // ------------------------------------------------------------ loading
@@ -1565,6 +1970,7 @@
   async function optimize(bytes, settings, progress) {
     progress(0.02, 'Reading PDF');
     const doc = await loadPdfLib(bytes);
+    const breakdown = composition(doc, bytes.length);
     checkAbort(settings.signal);
     progress(0.1, 'Analyzing images');
     await nextFrame();
@@ -1583,11 +1989,17 @@
     const signed = isSigned(doc);
     const privateRemoved = stripPrivateData(doc);
     if (settings.stripMetadata) stripMetadata(doc);
+    const xfaRemoved = removeStaticXfa(doc);
+    const usageRights = removeUsageRights(doc);
+    // Drop leftovers (e.g. old revisions) first so reference counts are exact.
+    let unreachable = removeUnreachable(doc);
+    const inlined = await inlineForms(doc, settings.signal);
+    if (inlined) unreachable += removeUnreachable(doc); // the forms and old page contents
     const duplicates = dedupeStreams(doc);
-    const unreachable = removeUnreachable(doc);
+    unreachable += removeUnreachable(doc);
     const plainSaved = await compressPlainStreams(doc);
-    const stats = Object.assign(imageStats, { pages: doc.getPageCount(), privateRemoved, duplicates, unreachable, plainSaved, pdfa, signed });
-    const changed = imageStats.recompressed || privateRemoved || duplicates || unreachable || plainSaved || settings.stripMetadata;
+    const stats = Object.assign(imageStats, { pages: doc.getPageCount(), breakdown, privateRemoved, xfaRemoved, usageRights, inlined, duplicates, unreachable, plainSaved, pdfa, signed });
+    const changed = imageStats.recompressed || privateRemoved || xfaRemoved || usageRights || inlined || duplicates || unreachable || plainSaved || settings.stripMetadata;
     // Re-writing an untouched file that already uses object streams cannot win.
     if (!changed && hasObjectStreams(bytes)) return { bytes, stats };
     bumpVersion(doc);

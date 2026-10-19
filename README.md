@@ -52,12 +52,23 @@ See [Calibration](#calibration) for how these values were chosen.
 4. Images browsers cannot decode (CMYK, JPEG 2000, Lab, ...) are decoded by
    [PDF.js](https://github.com/mozilla/pdf.js), which is only downloaded
    when such an image or *Convert pages to images* is needed.
-5. Lossless cleanups: unused objects, duplicate streams (common after
-   merging), private application data and embedded thumbnails are
-   removed; uncompressed, ASCII-encoded and LZW streams are re-compressed;
-   objects are packed into object streams (except for PDF/A-1 files, which
-   do not allow them).
+5. Lossless cleanups:
+   - Form XObjects that a page draws only once are drawn directly in the
+     page's content. Flattened form fields (tax returns and other filled
+     government forms) leave one small XObject per field, and each pays for
+     its own stream header and compresses poorly on its own.
+   - The Adobe XFA copy of a static form is removed. The form's fields and
+     page content stay (they are what every viewer except Acrobat shows);
+     dynamic XFA forms are left alone. Adobe Reader usage rights, which any
+     rewrite invalidates, are removed so Reader doesn't warn.
+   - Unused objects, duplicate streams (common after merging), private
+     application data and embedded thumbnails are removed.
+   - Uncompressed, ASCII-encoded and LZW streams are re-compressed, and
+     objects are packed into object streams (except for PDF/A-1 files,
+     which do not allow them).
 6. If the result is not at least 1% smaller, the original file is kept.
+   The result's *Details* show how the original divides into images,
+   fonts, text and drawings, and other data.
 
 ## Privacy
 
@@ -85,7 +96,11 @@ emulated Android and iPhone, in CI.
 
 - Password-protected or encrypted PDFs cannot be optimized directly. If
   the file opens without a password, *Convert pages to images* works.
-- Fonts are not subset, so text-only PDFs usually shrink only a little.
+- Fonts are not subset or merged. A document combined from many forms
+  embeds a copy of the same fonts for each form, and text-only PDFs
+  usually shrink only a little.
+- Removing XFA drops Acrobat-only form scripts (such as calculations);
+  the fields and their values stay.
 - Digital signatures do not survive any modification; pdfmini tells you
   when a signed PDF was compressed.
 - *Combine* keeps pages and their content, but not bookmarks or
@@ -154,6 +169,12 @@ about half the size of the one above it; going from 144 dpi/q72 to
 0-37% from the lossless steps alone (fonts are left untouched); files
 that are already tightly packed are returned unchanged.
 
+Forms gain the most from the lossless steps, with pages that render
+pixel-identically in poppler and PDF.js: fillable IRS forms (W-2, W-9, 1099,
+1040 and schedules) shrink 41-75% once the static XFA copy is removed,
+and a 32-page return made of filled and flattened IRS forms shrinks 57%,
+mostly by drawing its 1,716 field graphics inline.
+
 To repeat the measurements:
 
 ```sh
@@ -164,6 +185,7 @@ python tools/calibrate.py --out cal/ --dpi-eval 110,200 \
 ```
 
 `run-engine.mjs --cpu-throttle 4` approximates a mid-range phone,
+`tools/make-form-return.mjs` builds the flattened IRS-form return,
 `tools/profile-engine.mjs` prints a CPU profile, and
 `tools/screenshots.mjs` captures the UI on mobile and desktop in light and
 dark mode.

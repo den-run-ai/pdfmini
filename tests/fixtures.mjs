@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  PDFDocument, PDFName, PDFNumber, PDFString, StandardFonts, degrees, rgb,
+  PDFDocument, PDFName, PDFNumber, PDFString, PDFHexString, PDFBool, StandardFonts, degrees, rgb,
   pushGraphicsState, popGraphicsState, concatTransformationMatrix, drawObject,
 } from 'pdf-lib';
 
@@ -147,6 +147,62 @@ export async function formXObjectPdf() {
   return finish(doc);
 }
 
+/**
+ * A page like a flattened tax form: 40 single-use form XObjects (field
+ * appearances) whose /F1 is Helvetica while the page's /F1 is Times, whose
+ * backgrounds overflow their BBox, and some with scaled or rotated matrices.
+ * A form used twice, a transparency group and a form with an unclosed
+ * marked-content sequence must stay XObjects.
+ */
+export async function flattenedFormPdf() {
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const helvetica = await doc.embedFont(StandardFonts.Helvetica);
+  const times = await doc.embedFont(StandardFonts.TimesRoman);
+  await doc.flush();
+  const page = doc.addPage([612, 792]);
+  page.node.setFontDictionary(PDFName.of('F1'), times.ref);
+  const ops = ['BT /F1 18 Tf 50 740 Td (Form 1040 stand-in) Tj ET'];
+  const matrices = [[1, 0, 0, 1, 0, 0], [0.9, 0, 0, 0.9, 0, 0], [0, 1, -1, 0, 20, 0]];
+  for (let i = 0; i < 40; i++) {
+    const content = `0.9 0.95 1 rg -20 -20 200 60 re f BT /F1 10 Tf 0 0 0.5 rg 2 5 Td (Line ${i + 1}: ${(1234 + i * 37).toLocaleString('en-US')}) Tj ET`;
+    const form = ctx.register(ctx.flateStream(content, {
+      Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 120, 20], Matrix: matrices[i % 3],
+      Resources: { Font: { F1: helvetica.ref } },
+    }));
+    page.node.setXObject(PDFName.of(`Fx${i}`), form);
+    ops.push(`q 1 0 0 1 ${50 + (i % 4) * 135} ${680 - Math.floor(i / 4) * 60} cm /Fx${i} Do Q`);
+  }
+  const box = (content, extra) => ctx.register(ctx.flateStream(content, { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 40, 10], ...extra }));
+  page.node.setXObject(PDFName.of('Shared'), box('0 0.5 0 rg 0 0 40 10 re f'));
+  page.node.setXObject(PDFName.of('Group'), box('0.5 0 0 rg 0 0 40 10 re f', { Group: { S: 'Transparency' } }));
+  page.node.setXObject(PDFName.of('Unclosed'), box('/Artifact BMC 0 0 0.5 rg 0 0 40 10 re f'));
+  ops.push('q 1 0 0 1 50 60 cm /Shared Do Q', 'q 1 0 0 1 150 60 cm /Shared Do Q', 'q 1 0 0 1 250 60 cm /Group Do Q', 'q 1 0 0 1 350 60 cm /Unclosed Do Q');
+  page.node.set(PDFName.of('Contents'), ctx.register(ctx.flateStream(ops.join('\n'))));
+  return finish(doc);
+}
+
+/** A filled AcroForm that also carries a static XFA copy and usage rights. */
+export async function xfaFormPdf(dynamic = false) {
+  const base = await PDFDocument.create();
+  const font = await base.embedFont(StandardFonts.Helvetica);
+  const page = base.addPage([612, 792]);
+  addText(page, font, 'XFA form stand-in');
+  const field = base.getForm().createTextField('name');
+  field.setText('Jane Q Taxpayer');
+  field.addToPage(page, { x: 50, y: 600, width: 300, height: 24 });
+  // Reload so pdf-lib's form support doesn't strip the XFA we add.
+  const doc = await PDFDocument.load(await base.save());
+  const ctx = doc.context;
+  const template = '<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">' +
+    Array.from({ length: 400 }, (_, i) => `<field name="f${i}" w="${i}mm"><ui><textEdit/></ui></field>`).join('') + '</template>';
+  ctx.lookup(doc.catalog.get(PDFName.of('AcroForm'))).set(PDFName.of('XFA'),
+    ctx.obj([PDFString.of('template'), ctx.register(ctx.flateStream(template))]));
+  doc.catalog.set(PDFName.of('Perms'), ctx.obj({ UR3: ctx.register(ctx.obj({ Type: 'Sig', Filter: 'Adobe.PPKLite', SubFilter: 'adbe.pkcs7.detached', Contents: PDFHexString.of('00'.repeat(3000)) })) }));
+  if (dynamic) doc.catalog.set(PDFName.of('NeedsRendering'), PDFBool.True);
+  return Buffer.from(await doc.save({ useObjectStreams: false, updateFieldAppearances: false }));
+}
+
 /** Landscape-rotated page and a page with an unusual size. */
 export async function rotatedPdf() {
   const doc = await PDFDocument.create();
@@ -193,7 +249,10 @@ function drawXObject(page, name, ref, m) {
   page.pushOperators(pushGraphicsState(), concatTransformationMatrix(...m), drawObject(name), popGraphicsState());
 }
 
-const builders = { photoPdf, textPdf, pngAlphaPdf, mixedImagesPdf, formXObjectPdf, rotatedPdf, signedPdf, pdfa1Pdf };
+const builders = {
+  photoPdf, textPdf, pngAlphaPdf, mixedImagesPdf, formXObjectPdf, flattenedFormPdf, rotatedPdf, signedPdf, pdfa1Pdf,
+  xfaFormPdf, xfaDynamicPdf: () => xfaFormPdf(true),
+};
 
 /** Write all fixtures to a temp dir (once per process) and return their paths. */
 let cache = null;
